@@ -1,0 +1,111 @@
+/* Ruta: frontend/css/layout-sidebar.css */
+/* Barra lateral de navegacion (usada en el dashboard y todos los modulos
+   internos) y su comportamiento responsivo en celular: en pantallas
+   pequenas (menores a 768px) la barra queda oculta fuera de la pantalla por
+   defecto y solo se muestra al presionar el boton de menu (hamburguesa),
+   con un fondo oscuro semitransparente que permite cerrarla al tocar afuera.
+   El control por JavaScript vive en frontend/js/sidebar.js. */
+
+/* --- Barra lateral: comportamiento base (igual para escritorio y celular) --- */
+.barra-lateral {
+  background-color: var(--color-blanco-hueso);
+  border-right: 1px solid var(--color-gris-claro);
+  min-height: 100vh;
+}
+.barra-lateral .nav-link {
+  color: var(--color-gris-oscuro);
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: background-color var(--transicion-rapida), color var(--transicion-rapida), padding-left var(--transicion-rapida);
+}
+.barra-lateral .nav-link.active,
+.barra-lateral .nav-link:hover {
+  background-color: rgba(201, 162, 75, 0.16);
+  color: var(--color-negro);
+  padding-left: 1.1rem;
+}
+.barra-lateral .nav-link.active {
+  border-left: 3px solid var(--color-dorado-oscuro);
+  font-weight: 600;
+}
+.barra-lateral .border-top {
+  border-top-color: var(--color-gris-claro) !important;
+}
+
+/* --- Encabezado propio de la barra lateral en modo celular (marca + boton
+       de cerrar). Oculto en escritorio porque ahi la barra ya esta fija. --- */
+.encabezado-sidebar-movil {
+  display: none;
+}
+
+/* --- Barra superior fija, visible solo en celular (se oculta en escritorio
+       mediante la clase "d-md-none" de Bootstrap en el HTML). Contiene la
+       marca y el boton de hamburguesa que abre la barra lateral. --- */
+.barra-superior-movil {
+  background-color: var(--color-blanco-hueso);
+  border-bottom: 1px solid var(--color-gris-claro);
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+}
+
+/* --- Boton de hamburguesa / cerrar: circular, con foco visible y area de
+       toque de al menos 40x40px (buena practica de accesibilidad tactil) --- */
+.boton-hamburguesa {
+  background: none;
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 8px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  color: var(--color-negro);
+  transition: border-color var(--transicion-rapida), background-color var(--transicion-rapida);
+}
+.boton-hamburguesa:hover {
+  border-color: var(--color-dorado);
+  background-color: var(--color-crema);
+}
+
+/* --- Fondo oscuro ("backdrop") detras de la barra lateral cuando esta
+       abierta en celular. Cerrar la barra al hacer clic aqui es manejado
+       por sidebar.js. Oculto por defecto para no bloquear clics en desktop. --- */
+.fondo-sidebar-movil {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 28, 28, 0.35);
+  z-index: 1040;
+}
+.fondo-sidebar-movil.activo {
+  display: block;
+}
+
+/* --- Comportamiento exclusivo de celular / tablet pequena: la barra lateral
+       se convierte en un panel deslizante ("offcanvas") oculto por defecto. --- */
+@media (max-width: 767.98px) {
+  .barra-lateral {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 280px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform var(--transicion-media);
+    z-index: 1045;
+    box-shadow: var(--sombra-dorada-fuerte);
+    overflow-y: auto;
+  }
+  /* Clase agregada por sidebar.js al presionar el boton de hamburguesa */
+  .barra-lateral.mostrar-sidebar {
+    transform: translateX(0);
+  }
+  .encabezado-sidebar-movil {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+}

@@ -1,0 +1,31 @@
+# Ruta: .gitattributes
+# Normaliza los finales de linea de archivos de texto en TODO el repositorio,
+# para que un clon en Windows nunca introduzca retornos de carro (CRLF) en
+# scripts que deben ejecutarse dentro de contenedores Linux. Esta es la
+# PRIMERA capa de defensa; la segunda (y definitiva) esta en el Dockerfile
+# del frontend, que normaliza el archivo tambien en cada build.
+
+# Scripts de shell (Linux/Mac/contenedores): siempre con LF
+*.sh          text eol=lf
+*.command     text eol=lf
+
+# Scripts de Windows: siempre con CRLF (formato nativo esperado por cmd.exe)
+*.bat         text eol=crlf
+*.vbs         text eol=crlf
+
+# Archivos de configuracion y codigo: se normalizan automaticamente segun
+# el sistema operativo del desarrollador, sin forzar un formato especifico
+*.py          text
+*.js          text
+*.html        text
+*.css         text
+*.json        text
+*.md          text
+*.yml         text
+*.yaml        text
+*.conf        text eol=lf
+.env.example  text eol=lf
+
+# Archivos binarios: nunca deben ser tocados por Git
+*.png         binary
+*.db          binary

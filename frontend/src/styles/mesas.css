@@ -1,0 +1,40 @@
+/* frontend/src/styles/mesas.css */
+/* Plano de mesas: tarjetas de color por estado (libre en verde, ocupada en
+   dorado, pendiente de pago en rojo) con transición suave entre estados. */
+
+.mesas { display: grid; gap: 16px; }
+.mesas-barra { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mesas-leyenda, .mesas-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.mesas-rejilla { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.mesa-envoltura { position: relative; }
+
+.mesa {
+  width: 100%; min-height: 150px; padding: 14px; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 4px; justify-content: center;
+  border: 2px solid; border-radius: var(--radio); font-family: var(--fuente-cuerpo); color: var(--texto);
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+.mesa:hover { transform: translateY(-3px); box-shadow: var(--sombra); }
+.mesa:active { transform: scale(0.98); }
+.mesa.libre { background: rgba(47, 143, 91, 0.1); border-color: var(--verde); }
+.mesa.ocupada { background: rgba(201, 162, 39, 0.16); border-color: var(--dorado); }
+.mesa.pendiente_pago { background: rgba(192, 57, 43, 0.1); border-color: var(--rojo); }
+
+.mesa-numero { font-family: var(--fuente-titulos); font-size: 2rem; font-weight: 700; line-height: 1; }
+.mesa-estado { font-size: 0.8rem; font-weight: 600; }
+.mesa.libre .mesa-estado { color: var(--verde); }
+.mesa.ocupada .mesa-estado { color: var(--dorado-oscuro); }
+.mesa.pendiente_pago .mesa-estado { color: var(--rojo); }
+.mesa-total { font-size: 1.1rem; margin-top: 4px; }
+.mesa-tiempo { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--texto-suave); }
+
+.mesa-eliminar {
+  position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; border-radius: 8px; cursor: pointer; background: var(--blanco); color: var(--rojo); box-shadow: var(--sombra);
+}
+
+@media (max-width: 479.98px) {
+  .mesas-rejilla { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .mesa { min-height: 136px; }
+}

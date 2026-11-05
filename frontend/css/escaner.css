@@ -1,0 +1,443 @@
+/* Ruta: frontend/css/escaner.css */
+/* Estilos del modulo de escanador de codigos de barras.
+   El modal se inyecta dinamicamente desde escaner.js; esta hoja define
+   su apariencia siguiendo la paleta dorada/blanca del sistema.
+   Incluye la reticula de guia visual, zona oscurecida de enfoque,
+   animaciones de estado (buscando / detectado / error) y ajustes responsivos
+   para PC y movil. No depende de ningun nicho de negocio especifico. */
+
+/* ==========================================================================
+   VISOR DE VIDEO: contenedor principal donde Quagga inyecta el <video>
+   ========================================================================== */
+
+/* Contenedor principal del visor. Posicion relativa para que los elementos
+   superpuestos (reticula, zona oscura, estado) se posicionen dentro. */
+#escaner-visor-quagga {
+  position: relative;
+  background: #0a0a0a;
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 280px;
+  max-height: 440px;
+  /* Sombra interior dorada sutil para integrar con el tema del sistema */
+  box-shadow: inset 0 0 0 1px rgba(201, 162, 75, 0.2);
+  transition: box-shadow 0.3s ease;
+}
+
+/* El video inyectado por Quagga ocupa todo el contenedor */
+#escaner-visor-quagga video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+/* El canvas de superposicion de Quagga (rectangulos de deteccion) debe
+   estar sobre el video pero bajo la reticula del sistema */
+#escaner-visor-quagga canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+}
+
+/* ==========================================================================
+   ZONA OSCURECIDA: fondo semitransparente que rodea la reticula de guia.
+   Ayuda al usuario a enfocar el codigo dentro del area de lectura.
+   Se divide en 4 franjas (arriba, abajo, izquierda, derecha) para que
+   el centro quede transparente exactamente donde esta la reticula.
+   ========================================================================== */
+
+/* Franja superior oscurecida */
+.escaner-mascara-top,
+.escaner-mascara-bottom,
+.escaner-mascara-left,
+.escaner-mascara-right {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 8;
+  pointer-events: none;
+}
+
+/* La mascara superior ocupa desde el borde hasta el 20% del alto */
+.escaner-mascara-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 20%;
+}
+
+/* La mascara inferior ocupa desde el 80% del alto hasta el borde */
+.escaner-mascara-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 20%;
+}
+
+/* La mascara izquierda ocupa el espacio lateral (entre las mascaras top/bottom) */
+.escaner-mascara-left {
+  top: 20%;
+  left: 0;
+  width: 10%;
+  height: 60%;
+}
+
+/* La mascara derecha ocupa el espacio lateral opuesto */
+.escaner-mascara-right {
+  top: 20%;
+  right: 0;
+  width: 10%;
+  height: 60%;
+}
+
+/* ==========================================================================
+   RETICULA DE GUIA: marco central con esquinas doradas animadas.
+   Indica visualmente donde el usuario debe colocar el codigo de barras.
+   Las esquinas son los unicos bordes visibles; el centro quede abierto
+   para no obstruir la vista del codigo.
+   ========================================================================== */
+
+/* Contenedor de la reticula: ocupa el area central definida por las mascaras */
+.escaner-reticula {
+  position: absolute;
+  top: 20%;
+  left: 10%;
+  right: 10%;
+  bottom: 20%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Las cuatro esquinas de la reticula: elementos ::before y ::after de dos
+   divs internos. Cada esquina tiene dos segmentos (horizontal y vertical)
+   dibujados con bordes. El tamanio de cada segmento es 22px. */
+
+/* Esquina superior izquierda */
+.escaner-esquina-tl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  border-top: 3px solid var(--color-dorado-brillo);
+  border-left: 3px solid var(--color-dorado-brillo);
+  border-radius: 2px 0 0 0;
+  /* Sombra de resplandor dorado en las esquinas para visibilidad sobre el video */
+  filter: drop-shadow(0 0 4px rgba(224, 184, 92, 0.9));
+}
+
+/* Esquina superior derecha */
+.escaner-esquina-tr {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  border-top: 3px solid var(--color-dorado-brillo);
+  border-right: 3px solid var(--color-dorado-brillo);
+  border-radius: 0 2px 0 0;
+  filter: drop-shadow(0 0 4px rgba(224, 184, 92, 0.9));
+}
+
+/* Esquina inferior izquierda */
+.escaner-esquina-bl {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  border-bottom: 3px solid var(--color-dorado-brillo);
+  border-left: 3px solid var(--color-dorado-brillo);
+  border-radius: 0 0 0 2px;
+  filter: drop-shadow(0 0 4px rgba(224, 184, 92, 0.9));
+}
+
+/* Esquina inferior derecha */
+.escaner-esquina-br {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  border-bottom: 3px solid var(--color-dorado-brillo);
+  border-right: 3px solid var(--color-dorado-brillo);
+  border-radius: 0 0 2px 0;
+  filter: drop-shadow(0 0 4px rgba(224, 184, 92, 0.9));
+}
+
+/* Animacion de pulso suave en las esquinas: indica que el sistema esta
+   activo y buscando un codigo de barras. La opacidad oscila entre 0.7 y 1
+   para dar la sensacion de "respiracion" sin ser molesta. */
+.escaner-reticula .escaner-esquina-tl,
+.escaner-reticula .escaner-esquina-tr,
+.escaner-reticula .escaner-esquina-bl,
+.escaner-reticula .escaner-esquina-br {
+  animation: reticularPulso 2s ease-in-out infinite;
+}
+@keyframes reticularPulso {
+  0%, 100% { opacity: 0.75; }
+  50%       { opacity: 1; }
+}
+
+/* ==========================================================================
+   ESTADO: CODIGO DETECTADO
+   Cuando Quagga confirma un codigo, la reticula cambia a verde con un pulso
+   de confirmacion. Se aplica la clase .escaner-reticula--detectado desde JS.
+   ========================================================================== */
+
+.escaner-reticula--detectado .escaner-esquina-tl,
+.escaner-reticula--detectado .escaner-esquina-tr,
+.escaner-reticula--detectado .escaner-esquina-bl,
+.escaner-reticula--detectado .escaner-esquina-br {
+  border-color: #4caf50;
+  filter: drop-shadow(0 0 8px rgba(76, 175, 80, 0.95));
+  animation: reticularDetectado 0.4s ease-out forwards;
+}
+@keyframes reticularDetectado {
+  0%   { transform: scale(1);    opacity: 0.8; }
+  40%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+/* Pulso de destello verde sobre el visor completo cuando se detecta un codigo */
+.escaner-visor--detectado {
+  animation: visorPulsoVerde 0.5s ease-out forwards;
+}
+@keyframes visorPulsoVerde {
+  0%   { box-shadow: inset 0 0 0 1px rgba(201, 162, 75, 0.2); }
+  40%  { box-shadow: inset 0 0 0 3px rgba(76, 175, 80, 0.8),
+                     0 0 20px rgba(76, 175, 80, 0.4); }
+  100% { box-shadow: inset 0 0 0 1px rgba(201, 162, 75, 0.2); }
+}
+
+/* ==========================================================================
+   LINEA DE BARRIDO ANIMADA
+   Linea horizontal que sube y baja dentro de la reticula para indicar
+   que la camara esta activa y procesando frames continuamente.
+   ========================================================================== */
+
+.escaner-linea-scan {
+  position: absolute;
+  /* La linea empieza en el 20% (borde superior de la reticula) */
+  top: 20%;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(224, 184, 92, 0.2) 15%,
+    var(--color-dorado-brillo) 40%,
+    var(--color-dorado) 50%,
+    var(--color-dorado-brillo) 60%,
+    rgba(224, 184, 92, 0.2) 85%,
+    transparent 100%
+  );
+  box-shadow: 0 0 8px rgba(201, 162, 75, 0.7);
+  /* Solo recorre la altura del area de interes (del 20% al 80% del visor) */
+  animation: escanerBarridoReticula 2.2s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 11;
+}
+@keyframes escanerBarridoReticula {
+  /* Comienza en el borde superior de la reticula (20%) */
+  0%   { top: 21%; opacity: 0.6; }
+  5%   { opacity: 1; }
+  /* Llega al borde inferior de la reticula (80%) */
+  50%  { top: 79%; opacity: 1; }
+  95%  { opacity: 1; }
+  100% { top: 21%; opacity: 0.6; }
+}
+
+/* ==========================================================================
+   ETIQUETA DE INSTRUCCION CONTEXTUAL
+   Texto dinamico dentro del visor que cambia segun el estado del escanador.
+   Aparece en la parte inferior de la reticula.
+   ========================================================================== */
+
+.escaner-instruccion {
+  position: absolute;
+  bottom: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 0.75rem;
+  font-family: var(--fuente-cuerpo);
+  padding: 4px 12px;
+  border-radius: 20px;
+  white-space: nowrap;
+  pointer-events: none;
+  /* Borde sutil dorado para coherencia con el tema */
+  border: 1px solid rgba(201, 162, 75, 0.35);
+  letter-spacing: 0.2px;
+  /* Transicion suave al cambiar el texto */
+  transition: opacity 0.3s ease;
+}
+
+/* Variante verde cuando el codigo ya fue detectado */
+.escaner-instruccion--detectado {
+  background: rgba(47, 130, 70, 0.85);
+  border-color: rgba(76, 175, 80, 0.6);
+  color: #fff;
+}
+
+/* ==========================================================================
+   INDICADOR DE ESTADO ACTIVO (badge superior izquierdo)
+   ========================================================================== */
+
+#escaner-estado-activo {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #4caf50;
+  font-size: 0.73rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(76, 175, 80, 0.45);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* Pulso lento del punto de grabacion */
+  animation: puntoPulso 1.5s ease-in-out infinite;
+}
+@keyframes puntoPulso {
+  0%, 100% { opacity: 0.85; }
+  50%       { opacity: 1; }
+}
+
+/* ==========================================================================
+   PLACEHOLDER (estado antes de iniciar la camara)
+   ========================================================================== */
+
+#escaner-placeholder-camara {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 280px;
+  color: #666;
+  /* Gradiente sutil para que no sea un fondo negro plano */
+  background: linear-gradient(160deg, #111 0%, #1a1a1a 100%);
+}
+#escaner-placeholder-camara i {
+  font-size: 2.8rem;
+  color: rgba(201, 162, 75, 0.4);
+}
+#escaner-placeholder-camara span {
+  font-size: 0.88rem;
+  color: #777;
+}
+
+/* ==========================================================================
+   PANEL DE RESULTADO DEL ESCANEO
+   ========================================================================== */
+
+#escaner-resultado {
+  animation: apareceSuave 0.25s ease forwards;
+  border: 1px solid rgba(201, 162, 75, 0.4);
+  background: rgba(201, 162, 75, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+}
+
+/* ==========================================================================
+   BOTONES DE MODO (Camara / Lector fisico)
+   ========================================================================== */
+
+#escaner-btn-modo-camara,
+#escaner-btn-modo-manual {
+  min-height: 40px;
+  font-size: 0.9rem;
+}
+
+/* ==========================================================================
+   CAMPO DE ENTRADA MANUAL
+   Font-size >= 16px en movil para evitar el zoom automatico de iOS al enfocar
+   ========================================================================== */
+
+#escaner-campo-manual {
+  font-size: 1rem;
+}
+
+/* ==========================================================================
+   IMAGEN Y ICONO DEL RESULTADO
+   ========================================================================== */
+
+#escaner-resultado-imagen {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+#escaner-resultado-icono {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+}
+
+/* ==========================================================================
+   SELECTOR DE CAMARA
+   ========================================================================== */
+
+#escaner-selector-camara {
+  font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   RESPONSIVO: ajustes para pantallas pequenas (movil)
+   ========================================================================== */
+
+@media (max-width: 576px) {
+  /* Limita la altura del video en movil para que no ocupe toda la pantalla */
+  #escaner-visor-quagga video {
+    max-height: 280px;
+  }
+
+  /* Reduce el tamano de los botones de modo en pantallas muy pequenas */
+  #escaner-btn-modo-camara,
+  #escaner-btn-modo-manual {
+    font-size: 0.8rem;
+    padding: 0.35rem 0.5rem;
+  }
+
+  /* Aumenta el area de interes en movil: la camara trasera tiene mejor precision
+     y el usuario suele acercar mas el codigo, asi que se puede ampliar la reticula */
+  .escaner-reticula {
+    top: 25%;
+    left: 5%;
+    right: 5%;
+    bottom: 25%;
+  }
+  .escaner-mascara-top    { height: 25%; }
+  .escaner-mascara-bottom { height: 25%; }
+  .escaner-mascara-left   { top: 25%; width: 5%; height: 50%; }
+  .escaner-mascara-right  { top: 25%; right: 0; width: 5%; height: 50%; }
+
+  /* Ajusta la linea de barrido al area de interes del movil */
+  .escaner-linea-scan {
+    left: 5%;
+    right: 5%;
+  }
+  @keyframes escanerBarridoReticula {
+    0%   { top: 26%; opacity: 0.6; }
+    5%   { opacity: 1; }
+    50%  { top: 74%; opacity: 1; }
+    95%  { opacity: 1; }
+    100% { top: 26%; opacity: 0.6; }
+  }
+
+  /* Instruccion mas visible en movil */
+  .escaner-instruccion {
+    bottom: 27%;
+    font-size: 0.7rem;
+  }
+}

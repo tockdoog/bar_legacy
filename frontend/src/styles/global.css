@@ -1,0 +1,117 @@
+/* frontend/src/styles/global.css */
+/* Estilos globales: paleta dorado y blanco de Bar Legacy, tipografía, botones,
+   campos de formulario, tarjetas, spinner y accesibilidad (foco visible y
+   reducción de movimiento). Los componentes reutilizan estas clases. */
+
+/* --- Variables de diseño (paleta definida para el proyecto) --- */
+:root {
+  --dorado: #c9a227;
+  --dorado-oscuro: #9b7618;
+  --blanco: #ffffff;
+  --fondo: #f8f7f3;
+  --gris-suave: #eae8e1;
+  --texto: #292929;
+  --texto-suave: #6b6a65;
+  --verde: #2f8f5b;
+  --rojo: #c0392b;
+  --radio: 14px;
+  --sombra: 0 4px 18px rgba(41, 41, 41, 0.08);
+  --fuente-titulos: 'Playfair Display', Georgia, serif;
+  --fuente-cuerpo: 'Poppins', 'Segoe UI', sans-serif;
+}
+
+/* --- Base --- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #raiz { min-height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: var(--fuente-cuerpo);
+  -webkit-font-smoothing: antialiased;
+  /* Respeta las zonas seguras de iPhone con notch */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+h1, h2, h3, .titulo-marca { font-family: var(--fuente-titulos); margin: 0 0 8px; }
+.titulo-marca span { color: var(--dorado-oscuro); }
+.texto-suave { color: var(--texto-suave); font-size: 0.92rem; }
+.mensaje-error { color: var(--rojo); font-size: 0.9rem; margin: 8px 0; }
+
+.divisor-dorado {
+  width: 60px; height: 2px; border: 0; margin: 10px 0 14px;
+  background: linear-gradient(90deg, var(--dorado), transparent);
+}
+
+/* --- Foco visible para navegación con teclado --- */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--dorado-oscuro);
+  outline-offset: 2px;
+}
+
+/* --- Tarjeta --- */
+.tarjeta {
+  background: var(--blanco);
+  border: 1px solid var(--gris-suave);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 28px;
+}
+
+/* --- Botones --- */
+.boton {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 46px; padding: 0 20px; border-radius: 12px; border: 1px solid transparent;
+  font: 600 0.95rem var(--fuente-cuerpo); cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.boton:disabled { opacity: 0.6; cursor: not-allowed; }
+.boton:not(:disabled):active { transform: scale(0.98); }
+.boton-primario { background: var(--dorado); color: var(--blanco); }
+.boton-primario:not(:disabled):hover { background: var(--dorado-oscuro); box-shadow: 0 6px 18px rgba(201, 162, 39, 0.35); }
+.boton-secundario { background: var(--blanco); color: var(--texto); border-color: var(--gris-suave); }
+.boton-secundario:not(:disabled):hover { border-color: var(--dorado); }
+.boton-completo { width: 100%; margin-top: 12px; }
+.boton-icono { background: none; border: 0; padding: 6px; cursor: pointer; color: var(--texto-suave); display: flex; }
+
+/* --- Campos de formulario --- */
+.campo { display: block; margin-bottom: 14px; }
+.campo > span { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px; }
+.campo-caja {
+  display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 48px;
+  background: var(--blanco); border: 1px solid var(--gris-suave); border-radius: 12px; color: var(--texto-suave);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.campo-caja:focus-within { border-color: var(--dorado); box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.18); }
+.campo-caja input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font: 400 1rem var(--fuente-cuerpo); color: var(--texto);
+}
+
+/* --- Pantallas centradas y fondo del login --- */
+.pantalla-centrada {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px; padding: 20px; text-align: center;
+}
+.login-fondo {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: radial-gradient(circle at top right, #f3efe4 0%, var(--fondo) 55%);
+}
+.login-tarjeta { width: 100%; max-width: 420px; }
+.login-logo { width: 72px; height: 72px; object-fit: contain; margin-bottom: 8px; }
+
+/* --- Indicadores de carga --- */
+.spinner {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 3px solid var(--gris-suave); border-top-color: var(--dorado);
+  animation: girar 0.8s linear infinite;
+}
+.girar { animation: girar 0.8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* --- Respeta la preferencia del sistema de reducir animaciones --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}

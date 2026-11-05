@@ -1,0 +1,711 @@
+/* Ruta: frontend/css/componentes.css */
+/* Componentes de interfaz reutilizables en todo el sistema: tarjetas,
+   botones, formularios, tablas, insignias de estado, notificaciones tipo
+   toast, spinner de carga, indicadores KPI, skeleton loaders, estados
+   vacíos, chips de filtro rápido y la pantalla de bloqueo por suscripción.
+   Depende de las variables definidas en base.css (debe cargarse después de
+   ese archivo). */
+
+/* --- Tarjetas con fondo blanco y borde sutil dorado (componente base del
+       sistema). Incluyen una linea dorada decorativa en la parte superior. --- */
+.tarjeta-oscura {
+  position: relative;
+  background: var(--color-blanco);
+  border: 1px solid rgba(201, 162, 75, 0.35);
+  border-radius: var(--radio-borde);
+  box-shadow: var(--sombra-suave);
+  transition: border-color var(--transicion-media), box-shadow var(--transicion-media);
+  overflow: hidden;
+}
+.tarjeta-oscura::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-dorado) 0%, var(--color-dorado-brillo) 50%, transparent 100%);
+}
+.tarjeta-oscura:hover {
+  border-color: rgba(201, 162, 75, 0.6);
+  box-shadow: var(--sombra-dorada);
+}
+
+/* --- Boton principal de la marca (dorado con brillo en hover) --- */
+.btn-marca {
+  background: linear-gradient(135deg, var(--color-dorado) 0%, var(--color-dorado-oscuro) 100%);
+  border: none;
+  color: var(--color-negro);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border-radius: 10px;
+  transition: box-shadow var(--transicion-media), transform var(--transicion-rapida);
+}
+.btn-marca:hover,
+.btn-marca:focus {
+  box-shadow: var(--sombra-dorada-fuerte);
+  color: var(--color-negro);
+  transform: translateY(-1px);
+}
+.btn-marca:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.btn-marca:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* --- Boton secundario (borde oscuro suave, fondo blanco) --- */
+.btn-secundario {
+  background: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  color: var(--color-negro);
+  border-radius: 10px;
+  transition: border-color var(--transicion-rapida), background-color var(--transicion-rapida);
+}
+.btn-secundario:hover {
+  border-color: var(--color-dorado);
+  color: var(--color-negro);
+  background-color: var(--color-crema);
+}
+
+/* --- Campos de formulario sobre fondo blanco --- */
+.form-control,
+.form-select {
+  background-color: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  color: var(--color-negro);
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--color-blanco);
+  color: var(--color-negro);
+  border-color: var(--color-dorado);
+  box-shadow: 0 0 0 0.2rem rgba(201, 162, 75, 0.25);
+}
+.form-control::placeholder {
+  color: var(--color-gris-medio);
+  opacity: 0.85;
+}
+.form-label {
+  color: var(--color-gris-oscuro);
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
+}
+.form-control.is-invalid {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 0.2rem rgba(192, 57, 43, 0.18);
+}
+
+/* --- Grupo de input con icono (buscadores con lupa/escaner) --- */
+.input-group-text {
+  background-color: var(--color-crema) !important;
+  color: var(--color-dorado-oscuro) !important;
+  border: 1px solid var(--color-gris-claro) !important;
+}
+.input-group .form-control {
+  border-left: none;
+}
+
+/* --- Interruptores (switches de Bootstrap): acento dorado --- */
+.form-switch .form-check-input:checked {
+  background-color: var(--color-dorado);
+  border-color: var(--color-dorado-oscuro);
+}
+
+/* =========================================================================
+   OVERRIDE DE COMPONENTES DE BOOTSTRAP
+   El HTML del proyecto usa clases por defecto de Bootstrap como "table-dark"
+   y "btn-close-white" (pensadas para tema oscuro). Se sobrescriben aqui mismo
+   para que se vean correctas sobre el tema blanco y dorado sin tocar el HTML.
+   ========================================================================= */
+.table,
+.table-dark {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--color-negro);
+  --bs-table-striped-bg: var(--color-crema);
+  --bs-table-hover-bg: rgba(201, 162, 75, 0.12);
+  --bs-table-hover-color: var(--color-negro);
+  --bs-table-border-color: var(--color-gris-claro);
+  color: var(--color-negro);
+}
+.table thead th {
+  color: var(--color-gris-oscuro);
+  font-weight: 600;
+  border-bottom-width: 2px;
+  border-bottom-color: var(--color-dorado);
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.4px;
+}
+.btn-close-white {
+  filter: invert(1) grayscale(100%) brightness(0.4);
+}
+
+/* =========================================================================
+   TARJETAS PROPIAS DEL SISTEMA (mesa generica y producto de punto de venta)
+   ========================================================================= */
+.tarjeta-mesa {
+  border-radius: 12px;
+  padding: 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: transform var(--transicion-rapida), box-shadow var(--transicion-media);
+  border: 1px solid var(--color-gris-claro);
+  background-color: var(--color-blanco);
+}
+.tarjeta-mesa:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sombra-suave);
+}
+.tarjeta-mesa .numero-mesa {
+  font-family: var(--fuente-titulos);
+  font-size: 1.6rem;
+}
+.tarjeta-mesa.mesa-libre {
+  border-color: rgba(47, 143, 91, 0.5);
+}
+.tarjeta-mesa.mesa-libre .numero-mesa,
+.tarjeta-mesa.mesa-libre i {
+  color: var(--color-exito);
+}
+.tarjeta-mesa.mesa-ocupada {
+  background: linear-gradient(160deg, var(--color-dorado) 0%, var(--color-dorado-oscuro) 100%);
+  border-color: var(--color-dorado);
+  box-shadow: var(--sombra-dorada);
+  color: var(--color-blanco);
+}
+.tarjeta-mesa.mesa-ocupada .numero-mesa,
+.tarjeta-mesa.mesa-ocupada i,
+.tarjeta-mesa.mesa-ocupada small {
+  color: var(--color-blanco);
+}
+.tarjeta-mesa.mesa-pendiente {
+  border: 2px dashed var(--color-advertencia);
+  background-color: var(--color-crema);
+}
+.tarjeta-mesa.mesa-pendiente .numero-mesa,
+.tarjeta-mesa.mesa-pendiente i {
+  color: var(--color-advertencia);
+}
+
+.tarjeta-producto-pos {
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 10px;
+  padding: 0.75rem;
+  cursor: pointer;
+  background-color: var(--color-blanco);
+  transition: border-color var(--transicion-rapida), transform var(--transicion-rapida), box-shadow var(--transicion-media);
+  height: 100%;
+}
+.tarjeta-producto-pos:hover {
+  border-color: var(--color-dorado);
+  transform: translateY(-2px);
+  box-shadow: var(--sombra-suave);
+}
+
+/* --- Spinner de carga de la marca --- */
+.spinner-marca {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--color-gris-claro);
+  border-top-color: var(--color-dorado-oscuro);
+  border-radius: 50%;
+  display: inline-block;
+  animation: girar 0.7s linear infinite;
+}
+@keyframes girar {
+  to { transform: rotate(360deg); }
+}
+
+/* --- Insignias de estado (semaforo de inventario, alertas, etc.) --- */
+.insignia-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.insignia-estado.estado-bajo {
+  background: rgba(192, 57, 43, 0.1);
+  color: var(--color-error);
+  border: 1px solid rgba(192, 57, 43, 0.35);
+}
+.insignia-estado.estado-advertencia {
+  background: rgba(201, 148, 31, 0.12);
+  color: var(--color-advertencia);
+  border: 1px solid rgba(201, 148, 31, 0.35);
+}
+.insignia-estado.estado-ok {
+  background: rgba(47, 143, 91, 0.1);
+  color: var(--color-exito);
+  border: 1px solid rgba(47, 143, 91, 0.35);
+}
+.insignia-estado.estado-neutro {
+  background: var(--color-crema);
+  color: var(--color-gris-oscuro);
+  border: 1px solid var(--color-gris-claro);
+}
+.insignia-estado.estado-dorado {
+  background: rgba(201, 162, 75, 0.14);
+  color: var(--color-dorado-oscuro);
+  border: 1px solid rgba(201, 162, 75, 0.4);
+}
+
+/* --- Alerta de confirmacion (exito) --- */
+.alerta-confirmacion {
+  border: 1px solid rgba(47, 143, 91, 0.35);
+  background: rgba(47, 143, 91, 0.08);
+  color: var(--color-exito);
+  border-radius: 10px;
+}
+
+/* --- Circulo de icono para tarjetas de indicadores clave (KPI) --- */
+.indicador-kpi {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(201, 162, 75, 0.14);
+  color: var(--color-dorado-oscuro);
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+/* --- Notificaciones tipo "toast", esquina inferior derecha --- */
+.contenedor-notificaciones {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 1080;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 320px;
+}
+.notificacion-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: var(--color-blanco);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  box-shadow: var(--sombra-dorada-fuerte);
+  border-left: 4px solid var(--color-exito);
+  animation: apareceSuave var(--transicion-media) ease forwards;
+  font-size: 0.88rem;
+}
+.notificacion-toast.toast-error {
+  border-left-color: var(--color-error);
+}
+.notificacion-toast.toast-advertencia {
+  border-left-color: var(--color-advertencia);
+}
+.notificacion-toast i {
+  font-size: 1.05rem;
+  margin-top: 0.1rem;
+}
+.notificacion-toast.toast-error i { color: var(--color-error); }
+.notificacion-toast.toast-advertencia i { color: var(--color-advertencia); }
+.notificacion-toast:not(.toast-error):not(.toast-advertencia) i { color: var(--color-exito); }
+
+/* =========================================================================
+   SKELETON LOADERS
+   Bloques con "brillo" animado que ocupan el espacio de tablas, tarjetas o
+   listas MIENTRAS llega la respuesta del backend. Reemplazan al spinner
+   tradicional porque mantienen la forma final del contenido (menos "salto"
+   visual cuando los datos reales aparecen) y reducen la sensacion de espera.
+   Se desactivan automaticamente si el usuario tiene activado
+   "prefers-reduced-motion" gracias a la regla global definida en base.css.
+   ========================================================================= */
+@keyframes brilloSkeleton {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Linea generica de texto simulado (usada dentro de filas de tabla, tarjetas,
+   KPI numericos, etc.) */
+.skeleton-linea {
+  display: inline-block;
+  height: 0.85rem;
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--color-crema) 25%, var(--color-gris-claro) 37%, var(--color-crema) 63%);
+  background-size: 400% 100%;
+  animation: brilloSkeleton 1.4s ease infinite;
+  vertical-align: middle;
+}
+.skeleton-linea.skeleton-corta { width: 40%; }
+.skeleton-linea.skeleton-media { width: 65%; }
+.skeleton-linea.skeleton-larga { width: 90%; }
+
+/* Circulo simulado (usado para imagenes de producto, avatares, iconos KPI) */
+.skeleton-circulo {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--color-crema) 25%, var(--color-gris-claro) 37%, var(--color-crema) 63%);
+  background-size: 400% 100%;
+  animation: brilloSkeleton 1.4s ease infinite;
+  flex-shrink: 0;
+}
+
+/* Fila de tabla en estado de carga: mas espaciado vertical para que se note
+   como "placeholder" y no como una fila real con datos vacios */
+.skeleton-fila-tabla td {
+  padding: 0.95rem 0.75rem;
+}
+
+/* Tarjeta en estado de carga (para vistas tipo grid: POS, inventario en
+   tarjetas, promociones, mesas pendientes del dashboard, etc.) */
+.skeleton-tarjeta {
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: var(--color-blanco);
+  height: 100%;
+}
+.skeleton-tarjeta .skeleton-linea {
+  display: block;
+  margin-top: 0.6rem;
+}
+.skeleton-tarjeta .skeleton-linea:first-of-type {
+  margin-top: 0.75rem;
+}
+
+/* Bloque rectangular en estado de carga, usado como reemplazo temporal de un
+   grafico de Chart.js (un <canvas> no se puede "esqueletizar" con las clases
+   anteriores porque su contenido se dibuja por JS, no por HTML/CSS). Se
+   muestra superpuesto en el mismo espacio del grafico real mientras se
+   esperan los datos, y se oculta apenas Chart.js termina de dibujar. */
+.skeleton-grafico {
+  width: 100%;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--color-crema) 25%, var(--color-gris-claro) 37%, var(--color-crema) 63%);
+  background-size: 400% 100%;
+  animation: brilloSkeleton 1.4s ease infinite;
+}
+
+/* =========================================================================
+   ESTADOS VACIOS
+   Mensaje amigable que reemplaza a una tabla, lista o grid cuando la API
+   responde correctamente pero sin resultados (0 productos, 0 ventas del
+   dia, busqueda sin coincidencias, etc.). Evita dejar al usuario mirando
+   una tabla en blanco sin saber si hubo un error o simplemente no hay datos.
+   ========================================================================= */
+.estado-vacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: var(--color-gris-oscuro);
+  width: 100%;
+}
+.estado-vacio .icono-estado-vacio {
+  font-size: 2.75rem;
+  color: var(--color-dorado);
+  opacity: 0.55;
+  margin-bottom: 0.9rem;
+}
+.estado-vacio h6 {
+  font-family: var(--fuente-titulos);
+  color: var(--color-negro);
+  margin-bottom: 0.35rem;
+}
+.estado-vacio p {
+  max-width: 380px;
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+
+/* Variante "positiva" del estado vacio: se usa cuando no tener resultados es
+   una BUENA noticia (ej. "no hay mesas pendientes de cobro", "inventario en
+   buen estado"), no un error ni la ausencia de datos por crear. El icono se
+   pinta en verde de exito en vez del dorado neutro. */
+.estado-vacio.estado-vacio-positivo .icono-estado-vacio {
+  color: var(--color-exito);
+  opacity: 0.8;
+}
+
+/* =========================================================================
+   CHIPS DE CATEGORIA
+   Barra horizontal de botones tipo "pildora" para filtrar rapidamente una
+   grilla de productos por categoria (usado en el Punto de Venta). El chip
+   activo se resalta con el dorado de marca; los demas quedan neutros. Se
+   desplazan horizontalmente con scroll si hay mas categorias de las que
+   caben en el ancho de pantalla, sin romper el layout en celular.
+   ========================================================================= */
+.contenedor-chips-categoria {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  scrollbar-width: thin;
+}
+.chip-categoria {
+  flex-shrink: 0;
+  background: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-gris-oscuro);
+  white-space: nowrap;
+  transition: border-color var(--transicion-rapida), background-color var(--transicion-rapida), color var(--transicion-rapida), box-shadow var(--transicion-media);
+}
+.chip-categoria:hover {
+  border-color: var(--color-dorado);
+  color: var(--color-negro);
+}
+.chip-categoria.activo {
+  background: linear-gradient(135deg, var(--color-dorado) 0%, var(--color-dorado-oscuro) 100%);
+  color: var(--color-blanco);
+  border-color: var(--color-dorado);
+  box-shadow: var(--sombra-dorada);
+}
+
+/* =========================================================================
+   PANTALLA DE BLOQUEO POR SUSCRIPCION Y AVISO DE VENCIMIENTO PROXIMO
+   Estilos exclusivos del modal de bloqueo y del aviso de "falta 1 dia"
+   generados por frontend/js/suscripcion.js. Reutiliza las mismas variables
+   de color/sombra del resto del sistema para no introducir un tema visual
+   aparte. No depende de ningun nicho de negocio especifico.
+   ========================================================================= */
+
+/* --- Encabezado del modal de bloqueo: degradado rojo con icono de candado,
+       en vez del bg-danger plano de Bootstrap. --- */
+.modal-bloqueo-encabezado {
+  background: linear-gradient(135deg, #c0392b 0%, #922b21 100%);
+  border-radius: var(--radio-borde) var(--radio-borde) 0 0;
+}
+.icono-candado-bloqueo {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  color: #ffffff;
+}
+.texto-encabezado-bloqueo {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+}
+.modal-bloqueo-suscripcion-contenido {
+  border-radius: var(--radio-borde);
+  overflow: hidden;
+  border: none;
+}
+
+/* --- Tarjeta individual de cada medio de pago (Nequi, Bancolombia, etc.) --- */
+.tarjeta-cuenta-pago {
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 12px;
+  background: var(--color-blanco-hueso);
+  transition: border-color var(--transicion-rapida), transform var(--transicion-rapida);
+}
+.tarjeta-cuenta-pago:hover {
+  border-color: var(--color-dorado);
+  transform: translateY(-2px);
+}
+.icono-cuenta-pago {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: rgba(201, 162, 75, 0.14);
+  color: var(--color-dorado-oscuro);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+}
+
+/* --- Boton pequeño para copiar el numero/llave/correo al portapapeles --- */
+.btn-copiar-valor {
+  border: none;
+  background: transparent;
+  color: var(--color-gris-medio);
+  padding: 0.1rem 0.3rem;
+  line-height: 1;
+  transition: color var(--transicion-rapida);
+}
+.btn-copiar-valor:hover {
+  color: var(--color-dorado-oscuro);
+}
+.btn-copiar-valor:disabled {
+  color: var(--color-exito);
+  opacity: 1;
+}
+
+/* --- Visor de imagen ampliada (pantalla completa) para ver los códigos
+   QR de las cuentas de pago en grande. Se activa desde
+   frontend/js/suscripcion.js al hacer clic en el botón "Ver imagen"
+   (ícono de ojo) debajo de cada QR. --- */
+.visor-imagen-ampliada {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  cursor: zoom-out;
+}
+
+.contenido-imagen-ampliada {
+  max-width: min(90vw, 480px);
+  max-height: 80vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: var(--color-blanco);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.texto-imagen-ampliada {
+  color: var(--color-blanco);
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.boton-cerrar-imagen-ampliada {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--color-blanco);
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.boton-cerrar-imagen-ampliada:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+
+.btn-ver-qr {
+  background: var(--color-crema, #f4f1e8);
+  border: 1px solid var(--color-gris-claro);
+  color: var(--color-negro);
+  border-radius: 2rem;
+  padding: 0.25rem 0.9rem;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-ver-qr:hover {
+  background: var(--color-blanco);
+  border-color: var(--color-marca, #c9a24b);
+}
+
+/* =========================================================================
+   MODULO DE PROMOCIONES: galeria de miniaturas de producto (tarjeta),
+   miniatura de vista previa dentro de cada fila del formulario, y badge de
+   ganancia del negocio (visible solo para ADMINISTRADOR, ver promociones.js).
+   Reutiliza exclusivamente variables ya definidas en base.css; no introduce
+   colores nuevos fuera de la paleta blanco/dorado del sistema. El rojo usado
+   en el badge de ganancia es el mismo --color-error ya usado en el resto del
+   sistema para datos sensibles/de alerta (nunca un rojo decorativo nuevo).
+   ========================================================================= */
+
+/* --- Fila de miniaturas en la parte superior de cada tarjeta de promoción --- */
+.galeria-mini-promocion {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.miniatura-producto-promocion {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--color-gris-claro);
+  background: var(--color-blanco-hueso);
+  flex-shrink: 0;
+}
+
+/* Icono generico cuando el producto no tiene foto cargada */
+.miniatura-producto-promocion.miniatura-generica {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-gris-medio);
+  font-size: 1.1rem;
+}
+
+/* Circulo "+N" cuando el combo tiene mas productos de los que caben en la
+   galeria (ver MAXIMO_MINIATURAS_TARJETA en promociones.js) */
+.miniatura-producto-promocion.miniatura-contador {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-crema);
+  color: var(--color-dorado-oscuro);
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-style: dashed;
+}
+
+/* --- Miniatura de vista previa dentro de cada fila del formulario de
+   promocion (select de producto + cantidad). Un poco mas pequeña que la de
+   la tarjeta, para no desbalancear la fila. --- */
+.miniatura-fila-promocion {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--color-gris-claro);
+  background: var(--color-blanco-hueso);
+}
+.miniatura-fila-promocion.miniatura-generica {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-gris-medio);
+  font-size: 0.95rem;
+}
+
+/* --- Badge de ganancia del negocio: unico punto del modulo de promociones
+   que usa rojo, a proposito, para diferenciar un dato financiero SENSIBLE
+   (visible solo para ADMINISTRADOR) del badge de ahorro del cliente (dorado,
+   visible para cualquier rol). Mismo tono --color-error que ya usa el resto
+   del sistema en mensajes de error y alertas, para no introducir un rojo
+   nuevo fuera de la paleta existente. --- */
+.insignia-estado.estado-ganancia-negocio {
+  background: rgba(192, 57, 43, 0.08);
+  color: var(--color-error);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+}

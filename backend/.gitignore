@@ -1,0 +1,10 @@
+# Ruta: backend/.gitignore
+# Evita que archivos sensibles o generados localmente se suban al control de versiones.
+
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+uploads/

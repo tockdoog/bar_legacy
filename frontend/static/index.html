@@ -1,0 +1,82 @@
+<!-- Ruta: frontend/index.html -->
+<!-- Página de inicio de sesión. Punto de entrada del sistema: valida credenciales contra la API. -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Evita que el navegador intente adivinar el tipo de contenido (defensa adicional en el cliente) -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <title>Iniciar sesión | Sistema de Administración</title>
+
+  <!-- Bootstrap 5 (estructura y componentes responsivos) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- Tipografías: serif elegante para la marca, sans-serif para el cuerpo -->
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet" referrerpolicy="no-referrer" />
+  <!-- Íconos usados en el acento decorativo de marca -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- Estilos propios del sistema (paleta blanco / dorado / negro, estilo bar premium) -->
+  <link href="css/styles.css" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- Contenedor de pantalla completa dividido en dos columnas (marca + formulario) -->
+  <div class="container-fluid vh-100">
+    <div class="row h-100">
+
+      <!-- Columna izquierda: declaración de marca, oculta en pantallas pequeñas.
+           Fondo en degradado crema/dorado suave (antes era un degradado negro
+           que no correspondía a la paleta blanco y dorado del sistema). -->
+      <div class="col-lg-7 d-none d-lg-flex flex-column justify-content-center align-items-start px-5"
+           style="background: radial-gradient(circle at 25% 20%, rgba(201, 162, 75, 0.18) 0%, transparent 55%), linear-gradient(160deg, var(--color-crema) 0%, var(--color-blanco) 75%); border-right: 1px solid var(--color-gris-claro);">
+        <span class="insignia-estado estado-dorado mb-3"><i class="bi bi-stars"></i> Panel de administración</span>
+        <h1 class="display-3 marca-sistema mb-3">Gestión <span>total</span><br>de tu negocio</h1>
+        <hr class="divisor-dorado my-4" />
+        <p class="texto-secundario fs-5" style="max-width: 480px;">
+          Inventario, ventas, mesas y reportes en un solo lugar, pensado en pesos colombianos
+          y diseñado para usarse sin complicaciones.
+        </p>
+      </div>
+
+      <!-- Columna derecha: tarjeta con el formulario de inicio de sesión -->
+      <div class="col-lg-5 d-flex justify-content-center align-items-center px-3">
+        <div class="tarjeta-oscura p-4 p-md-5 w-100 animacion-entrada" style="max-width: 420px;">
+
+          <!-- Encabezado del formulario -->
+          <h2 class="marca-sistema text-center mb-1">Iniciar <span>sesión</span></h2>
+          <p class="texto-secundario text-center mb-4">Ingresa tus credenciales para continuar</p>
+
+          <!-- Mensaje de error (oculto por defecto, se muestra desde auth.js).
+               aria-live permite que lectores de pantalla anuncien el error al aparecer. -->
+          <div id="mensaje-error-login" class="alert alert-danger py-2 d-none" role="alert" aria-live="assertive"></div>
+
+          <!-- Formulario de autenticación -->
+          <form id="formulario-login" novalidate>
+            <div class="mb-3">
+              <label for="campo-usuario" class="form-label">Usuario</label>
+              <input type="text" class="form-control" id="campo-usuario" autocomplete="username" required />
+            </div>
+            <div class="mb-4">
+              <label for="campo-contrasena" class="form-label">Contraseña</label>
+              <input type="password" class="form-control" id="campo-contrasena" autocomplete="current-password" required minlength="8" />
+            </div>
+            <button type="submit" id="boton-ingresar" class="btn btn-marca w-100 py-2">Ingresar</button>
+          </form>
+
+          <p class="texto-secundario text-center mt-4 mb-0" style="font-size: 0.8rem;">
+            Acceso exclusivo para personal autorizado del negocio.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (componentes interactivos) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Funciones compartidas para consumir la API -->
+  <script src="js/api.js"></script>
+  <!-- Lógica propia de esta página -->
+  <script src="js/auth.js"></script>
+</body>
+</html>

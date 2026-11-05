@@ -1,0 +1,442 @@
+/* Ruta: frontend/css/pos-plano.css */
+/* Plano de salon del punto de venta: mesas con posicion libre, zona de caja,
+   pisos multiples, elementos decorativos y vista 3D ajustable. Todo el
+   posicionamiento es absoluto dentro de un lienzo con scroll, para
+   representar la distribucion real del local. La posicion/forma/piso de
+   cada mesa y elemento, ademas del angulo 3D, se guardan en localStorage
+   (preferencia visual local del dispositivo), no en el backend FastAPI.
+   Incluye el skeleton loader y el estado vacio del plano: como el lienzo es
+   un contenedor absoluto que tambien aloja la zona de caja y los elementos
+   decorativos, estos dos estados NO usan las funciones genericas de
+   ui-estados.js (que limpian todo el contenedor); se dibujan como una capa
+   adicional que se agrega y se retira sin tocar el resto del plano. */
+
+/* Lienzo del plano: superficie sobre la que se distribuyen mesas y elementos.
+   Patron de cuadricula muy sutil para dar sensacion de "plano" sin saturar.
+   perspective habilita la profundidad 3D de la capa interior cuando aplica. */
+.lienzo-plano {
+  position: relative;
+  width: 100%;
+  min-height: 480px;
+  background-color: var(--color-blanco-hueso);
+  background-image:
+    linear-gradient(rgba(201, 162, 75, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201, 162, 75, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+  border: 1px solid var(--color-gris-claro);
+  border-radius: var(--radio-borde);
+  overflow: auto;
+  touch-action: none;
+  perspective: 900px;
+}
+.lienzo-plano.modo-organizar {
+  cursor: grab;
+  border-color: var(--color-dorado);
+  box-shadow: inset 0 0 0 2px rgba(201, 162, 75, 0.25);
+}
+.lienzo-plano.modo-organizar .ficha-mesa,
+.lienzo-plano.modo-organizar .elemento-decorativo {
+  cursor: grab;
+}
+.lienzo-plano.modo-organizar .ficha-mesa:active,
+.lienzo-plano.modo-organizar .elemento-decorativo:active {
+  cursor: grabbing;
+}
+/* Fondo con degradado y sombra interior mas marcada cuando la vista 3D esta
+   activa, para reforzar visualmente la sensacion de profundidad del "piso" */
+.lienzo-plano.vista-3d-activa {
+  background-image:
+    linear-gradient(180deg, rgba(28, 28, 28, 0.05) 0%, transparent 40%),
+    linear-gradient(rgba(201, 162, 75, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(201, 162, 75, 0.1) 1px, transparent 1px);
+  box-shadow: inset 0 30px 40px -20px rgba(28, 28, 28, 0.25);
+}
+
+/* Capa interior que recibe la inclinacion 3D (rotateX). El angulo lo controla
+   pos.js mediante la variable CSS --angulo-3d, aplicada con setProperty() para
+   poder animarlo suavemente. transform-origin "top center" simula ver el
+   salon desde arriba, como una camara isometrica de videojuego. */
+.capa-plano {
+  position: relative;
+  width: 100%;
+  min-height: 480px;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--angulo-3d, 0deg));
+  transform-origin: top center;
+  transition: transform 0.5s ease;
+}
+/* Sombra de "piso" bajo el plano cuando la vista 3D esta activa: ayuda a que
+   el ojo perciba que la superficie realmente se inclino hacia atras. */
+.capa-plano.vista-3d-con-sombra::after {
+  content: "";
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: -18px;
+  height: 18px;
+  background: radial-gradient(ellipse at center, rgba(28, 28, 28, 0.18) 0%, transparent 75%);
+  pointer-events: none;
+}
+
+/* Zona de caja: elemento fijo decorativo que da referencia espacial al salon.
+   No es una mesa real, por eso usa una forma e icono distintos. */
+.zona-caja {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  width: 92px;
+  height: 92px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, var(--color-negro) 0%, var(--color-gris-oscuro) 100%);
+  color: var(--color-blanco);
+  box-shadow: var(--sombra-suave);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-align: center;
+  user-select: none;
+  z-index: 1;
+}
+.zona-caja i {
+  font-size: 1.4rem;
+  color: var(--color-dorado-brillo);
+}
+
+/* Ficha de mesa: posicionamiento absoluto sobre la capa del plano */
+.ficha-mesa {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  background-color: var(--color-blanco);
+  border: 2px solid var(--color-gris-claro);
+  box-shadow: var(--sombra-suave);
+  transition: transform var(--transicion-rapida), box-shadow var(--transicion-media), border-color var(--transicion-media);
+  user-select: none;
+  z-index: 2;
+  animation: apareceSuave var(--transicion-media) ease forwards;
+}
+.ficha-mesa:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: var(--sombra-dorada);
+}
+.ficha-mesa.forma-redonda {
+  border-radius: 50%;
+}
+.ficha-mesa.forma-cuadrada {
+  border-radius: 14px;
+}
+.ficha-mesa .numero-mesa {
+  font-family: var(--fuente-titulos);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.ficha-mesa .icono-estado-mesa {
+  font-size: 1.1rem;
+}
+.ficha-mesa .etiqueta-estado-mesa {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.ficha-mesa.estado-mesa-libre {
+  border-color: rgba(47, 143, 91, 0.55);
+}
+.ficha-mesa.estado-mesa-libre .icono-estado-mesa,
+.ficha-mesa.estado-mesa-libre .etiqueta-estado-mesa {
+  color: var(--color-exito);
+}
+.ficha-mesa.estado-mesa-ocupada {
+  background: linear-gradient(160deg, var(--color-dorado) 0%, var(--color-dorado-oscuro) 100%);
+  border-color: var(--color-dorado);
+  box-shadow: var(--sombra-dorada);
+}
+.ficha-mesa.estado-mesa-ocupada .numero-mesa,
+.ficha-mesa.estado-mesa-ocupada .icono-estado-mesa,
+.ficha-mesa.estado-mesa-ocupada .etiqueta-estado-mesa {
+  color: var(--color-blanco);
+}
+.ficha-mesa.estado-mesa-pendiente {
+  border: 2px dashed var(--color-advertencia);
+  background-color: var(--color-crema);
+  animation: pulsoPendiente 1.6s ease-in-out infinite;
+}
+.ficha-mesa.estado-mesa-pendiente .icono-estado-mesa,
+.ficha-mesa.estado-mesa-pendiente .etiqueta-estado-mesa {
+  color: var(--color-advertencia);
+}
+@keyframes pulsoPendiente {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 148, 31, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(201, 148, 31, 0.12); }
+}
+
+/* Boton de menu contextual (3 puntos) sobre cada ficha de mesa o elemento */
+.boton-menu-mesa {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-negro);
+  color: var(--color-blanco);
+  border: 2px solid var(--color-blanco);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  z-index: 3;
+  box-shadow: var(--sombra-suave);
+}
+.boton-menu-mesa:hover {
+  background: var(--color-dorado-oscuro);
+}
+
+/* Tarjeta flotante de menu contextual (se posiciona con JS via coordenadas) */
+.menu-contextual-mesa {
+  position: fixed;
+  z-index: 1050;
+  min-width: 230px;
+  max-width: 260px;
+  background: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 12px;
+  box-shadow: var(--sombra-dorada-fuerte);
+  padding: 0.5rem;
+  animation: apareceSuave 0.18s ease forwards;
+}
+.menu-contextual-mesa .titulo-menu-contextual {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-gris-medio);
+  padding: 0.35rem 0.6rem;
+}
+.menu-contextual-mesa button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--color-negro);
+  transition: background-color var(--transicion-rapida);
+}
+.menu-contextual-mesa button:hover {
+  background-color: var(--color-crema);
+}
+.menu-contextual-mesa button.opcion-peligro {
+  color: var(--color-error);
+}
+.menu-contextual-mesa hr {
+  margin: 0.35rem 0;
+  border-color: var(--color-gris-claro);
+}
+
+/* Fondo invisible para cerrar el menu contextual al hacer clic afuera */
+.fondo-cerrar-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  background: transparent;
+}
+
+/* Barra de resumen de estados de mesas (contador tipo semaforo) */
+.barra-resumen-mesas {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.barra-resumen-mesas .pastilla-resumen {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--color-blanco-hueso);
+  border: 1px solid var(--color-gris-claro);
+}
+/* Pastilla de resumen en estado de carga: la linea de skeleton hereda el
+   mismo tamano de pildora para que no "salte" el layout al llegar los datos */
+.barra-resumen-mesas .pastilla-resumen .skeleton-linea {
+  height: 0.7rem;
+}
+
+/* =========================================================================
+   PESTANAS DE PISO (multiples plantas del local: piso 1, terraza, etc.)
+   ========================================================================= */
+.barra-pisos {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.pestana-piso {
+  background: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-gris-oscuro);
+  transition: all var(--transicion-rapida);
+}
+.pestana-piso:hover {
+  border-color: var(--color-dorado);
+}
+.pestana-piso.activa {
+  background: linear-gradient(135deg, var(--color-dorado) 0%, var(--color-dorado-oscuro) 100%);
+  color: var(--color-blanco);
+  border-color: var(--color-dorado);
+  box-shadow: var(--sombra-dorada);
+}
+
+/* Animacion al cambiar de piso: el plano reaparece suavemente */
+.animacion-cambio-piso {
+  animation: apareceSuave var(--transicion-media) ease forwards;
+}
+
+/* =========================================================================
+   PALETA DE ELEMENTOS DECORATIVOS (TV, juegos, barra, planta, entrada,
+   punto de referencia personalizado). Se muestran solo en modo "organizar".
+   ========================================================================= */
+.paleta-elementos {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/* Ficha de un elemento decorativo colocado en el plano. Borde punteado para
+   diferenciarla claramente de una mesa real (punto de venta operativo). */
+.elemento-decorativo {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border-radius: 12px;
+  background-color: var(--color-blanco);
+  border: 2px dashed var(--color-gris-claro);
+  box-shadow: var(--sombra-suave);
+  user-select: none;
+  z-index: 2;
+  font-size: 0.62rem;
+  text-align: center;
+  color: var(--color-gris-oscuro);
+  transition: box-shadow var(--transicion-media), border-color var(--transicion-media);
+  animation: apareceSuave var(--transicion-media) ease forwards;
+}
+.elemento-decorativo:hover {
+  border-color: var(--color-dorado);
+  box-shadow: var(--sombra-dorada);
+}
+.elemento-decorativo i {
+  font-size: 1.3rem;
+  color: var(--color-dorado-oscuro);
+  /* Flotado sutil solo en el icono, para no interferir con la rotacion que
+     pos.js aplica al contenedor completo del elemento. */
+  animation: flotarSuave 3.4s ease-in-out infinite;
+}
+.elemento-decorativo .etiqueta-elemento-decorativo {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+.elemento-decorativo.tam-pequeno { width: 64px; height: 64px; }
+.elemento-decorativo.tam-mediano { width: 88px; height: 88px; }
+.elemento-decorativo.tam-grande  { width: 116px; height: 116px; }
+.elemento-decorativo.tam-grande i { font-size: 1.7rem; }
+
+@keyframes flotarSuave {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+/* Tonalidades sutiles por tipo de elemento, para reconocerlos de un vistazo
+   sin romper la paleta blanco/dorado del sistema */
+.elemento-decorativo.elemento-tv i        { color: var(--color-info); }
+.elemento-decorativo.elemento-juegos i    { color: var(--color-dorado-oscuro); }
+.elemento-decorativo.elemento-barra i     { color: var(--color-advertencia); }
+.elemento-decorativo.elemento-planta i    { color: var(--color-exito); }
+.elemento-decorativo.elemento-entrada i   { color: var(--color-gris-oscuro); }
+
+/* =========================================================================
+   CONTROL DE VISTA 3D (interruptor + inclinacion ajustable con slider)
+   ========================================================================= */
+.control-inclinacion {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.control-inclinacion input[type="range"] {
+  width: 150px;
+  accent-color: var(--color-dorado-oscuro);
+}
+
+/* =========================================================================
+   SKELETON DE MESAS (estado de carga del plano)
+   Fichas "fantasma" del mismo tamano que una mesa real, colocadas en las
+   mismas posiciones de cuadricula automatica que usa pos.js. Reutiliza la
+   animacion @keyframes brilloSkeleton definida globalmente en componentes.css.
+   ========================================================================= */
+.ficha-mesa-skeleton {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--color-crema) 25%, var(--color-gris-claro) 37%, var(--color-crema) 63%);
+  background-size: 400% 100%;
+  animation: brilloSkeleton 1.4s ease infinite;
+  z-index: 2;
+}
+
+/* =========================================================================
+   ESTADO VACIO DEL PLANO (sin mesas creadas o piso sin mesas)
+   Se agrega como una capa flotante centrada DENTRO de #capa-plano, sin
+   limpiar sus hijos (a diferencia de mostrarEstadoVacio() de ui-estados.js),
+   porque #capa-plano tambien contiene la zona de caja y los elementos
+   decorativos, que deben seguir visibles.
+   ========================================================================= */
+.estado-vacio-plano {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 300px;
+  z-index: 1;
+}
+.estado-vacio-plano .icono-estado-vacio {
+  font-size: 2.5rem;
+  color: var(--color-dorado);
+  opacity: 0.55;
+  margin-bottom: 0.75rem;
+}
+.estado-vacio-plano h6 {
+  font-family: var(--fuente-titulos);
+  color: var(--color-negro);
+  margin-bottom: 0.35rem;
+}
+.estado-vacio-plano p {
+  font-size: 0.85rem;
+  margin-bottom: 0.9rem;
+}

@@ -1,0 +1,13 @@
+/* Ruta: frontend/css/styles.css */
+/* Punto de entrada unico de estilos del sistema. No define reglas propias:
+   solo importa, en orden, cada hoja especializada. Se mantiene este archivo
+   como "maestro" para que ninguna pagina HTML del proyecto tenga que
+   cambiar su <link href="css/styles.css">; si en el futuro se quiere ganar
+   rendimiento evitando @import, basta con reemplazar este archivo por varios
+   <link> directos en cada HTML apuntando a los archivos de abajo. */
+
+@import url("base.css");          /* Variables, tipografia, reset y utilidades base */
+@import url("componentes.css");   /* Tarjetas, botones, formularios, tablas, insignias */
+@import url("layout-sidebar.css");/* Barra lateral y su version movil tipo "offcanvas" */
+@import url("pos-plano.css");     /* Plano de salon del punto de venta (mesas, pisos, 3D) */
+@import url("escaner.css");       /* Modal del escaner de codigos de barras */

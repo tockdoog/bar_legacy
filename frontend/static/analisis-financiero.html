@@ -1,0 +1,526 @@
+<!-- Ruta: frontend/analisis-financiero.html -->
+<!-- Modulo de Analisis Financiero e Impuestos. Permite al administrador:
+     configurar el impuesto aplicado (sin impuesto, IVA, INC o personalizado)
+     y el margen de utilidad deseado; consultar el resumen financiero del
+     negocio por periodo (ingresos, gastos, ganancia e impuesto estimado);
+     usar la calculadora de precio de venta recomendado; y revisar el
+     analisis de rentabilidad de cada producto del inventario, con
+     advertencias de perdida o bajo margen. Exclusivo para ADMINISTRADOR.
+     Incluye ayudas visuales breves (icono "i" con tooltip) en cada campo
+     clave para que el administrador entienda que significa cada dato sin
+     necesidad de salir de la pagina. -->
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Previene que el navegador infiera un MIME distinto al declarado (seguridad) -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <title>Análisis Financiero e Impuestos | Sistema de Administracion</title>
+
+    <link rel="icon" type="image/png" href="/imagenes/logo.png" />
+    <link rel="shortcut icon" type="image/png" href="/imagenes/logo.png" />
+    <!-- Bootstrap CSS: componentes y grid del sistema -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Fuentes tipograficas del sistema -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600&display=swap"
+        rel="stylesheet" referrerpolicy="no-referrer" />
+    <!-- Bootstrap Icons: iconos vectoriales -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet"
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Hoja de estilos personalizada del sistema -->
+    <link href="css/styles.css" rel="stylesheet" />
+
+    <style>
+        /* --- Bloque: estilo del icono de ayuda "i" reutilizado junto a cada
+       etiqueta clave del modulo. Se mantiene aqui (y no en componentes.css)
+       porque es exclusivo de este modulo educativo. --- */
+        .icono-ayuda {
+            cursor: help;
+            color: var(--color-dorado-oscuro, #b8860b);
+            font-size: 0.95rem;
+            margin-left: 0.3rem;
+        }
+
+        .icono-ayuda:hover {
+            opacity: 0.75;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ===== Barra superior, visible solo en celular/tablet ===== -->
+    <header class="barra-superior-movil d-md-none d-flex align-items-center justify-content-between px-3 py-2">
+        <div class="marca-sistema fs-5 mb-0">Mi<span>Negocio</span></div>
+        <button id="boton-alternar-sidebar" class="boton-hamburguesa" type="button"
+            aria-label="Abrir menú de navegación" aria-expanded="false" aria-controls="barra-lateral-navegacion">
+            <i class="bi bi-list"></i>
+        </button>
+    </header>
+
+    <!-- Fondo oscuro detras de la barra lateral cuando esta abierta en celular -->
+    <div id="fondo-sidebar-movil" class="fondo-sidebar-movil"></div>
+
+    <div class="container-fluid">
+        <div class="row">
+
+            <!-- ===== Barra lateral de navegacion ===== -->
+            <nav id="barra-lateral-navegacion" class="col-12 col-md-3 col-xl-2 barra-lateral p-3 d-flex flex-column">
+                <div class="encabezado-sidebar-movil mb-3">
+                    <div class="marca-sistema fs-5 mb-0">Mi<span>Negocio</span></div>
+                    <button id="boton-cerrar-sidebar-movil" class="boton-hamburguesa" type="button"
+                        aria-label="Cerrar menú de navegación">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+
+                <div class="marca-sistema fs-4 mb-4 px-2 d-none d-md-block">Mi<span>Negocio</span></div>
+                <ul class="nav nav-pills flex-column gap-1">
+                    <li class="nav-item">
+                        <a class="nav-link" href="dashboard.html">
+                            <i class="bi bi-grid-1x2 me-2"></i>Panel principal
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="inventario.html">
+                            <i class="bi bi-box-seam me-2"></i>Inventario
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="pos.html">
+                            <i class="bi bi-cash-coin me-2"></i>Punto de venta
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="compras.html">
+                            <i class="bi bi-truck me-2"></i>Proveedores
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="promociones.html">
+                            <i class="bi bi-stars me-2"></i>Promociones
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="reportes.html">
+                            <i class="bi bi-bar-chart-line me-2"></i>Reportes
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="usuarios.html">
+                            <i class="bi bi-people me-2"></i>Usuarios
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="analisis-financiero.html">
+                            <i class="bi bi-calculator me-2"></i>Análisis financiero
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                    </li>
+                </ul>
+
+                <div class="mt-auto pt-3 border-top">
+                    <p class="texto-secundario mb-1" style="font-size: 0.8rem;">Sesion activa</p>
+                    <p class="mb-2 fw-semibold" id="texto-nombre-usuario">—</p>
+                    <button id="boton-cerrar-sesion" class="btn btn-secundario btn-sm w-100"
+                        aria-label="Cerrar sesion actual">
+                        <i class="bi bi-box-arrow-right me-1"></i> Cerrar sesion
+                    </button>
+                </div>
+            </nav>
+
+            <!-- ===== Contenido principal ===== -->
+            <main class="col-12 col-md-9 col-xl-10 p-4">
+
+                <!-- Fragmento a insertar en frontend/analisis-financiero.html -->
+                <!-- Ubicación: justo antes de cerrar el bloque "Encabezado del modulo",
+     agrega el botón que abre el modal de ayuda -->
+                <div class="mb-3 d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div>
+                        <h2 class="marca-sistema mb-0">
+                            <i class="bi bi-calculator me-2"></i>Análisis <span>financiero e impuestos</span>
+                        </h2>
+                        <p class="texto-secundario mb-0">
+                            Calcula gastos, ganancias, impuestos y el precio de venta recomendado (COP)
+                        </p>
+                    </div>
+                    <!-- Botón que abre el instructivo completo del módulo -->
+                    <button type="button" class="btn btn-secundario" data-bs-toggle="modal"
+                        data-bs-target="#modal-ayuda-financiero">
+                        <i class="bi bi-question-circle me-1"></i> Ayuda / Instructivo
+                    </button>
+                </div>
+
+                <!-- ===== Modal: instructivo completo del módulo ===== -->
+                <div class="modal fade" id="modal-ayuda-financiero" tabindex="-1"
+                    aria-labelledby="tituloModalAyudaFinanciero" aria-hidden="true">
+                    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title marca-sistema" id="tituloModalAyudaFinanciero">
+                                    <i class="bi bi-book me-2"></i>Cómo usar el Análisis Financiero e Impuestos
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                    aria-label="Cerrar"></button>
+                            </div>
+                            <div class="modal-body">
+
+                                <h6 class="fw-semibold"><i class="bi bi-1-circle me-1"></i> Configura tu impuesto y
+                                    margen</h6>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    Primero elige el impuesto que cobras (o "Sin impuesto" si no aplica) y
+                                    define tu <strong>margen de utilidad deseado</strong>: el porcentaje que
+                                    quieres ganar sobre cada venta. Este valor se usa por defecto en toda
+                                    la página, así que configúralo antes de revisar lo demás.
+                                </p>
+
+                                <hr />
+
+                                <h6 class="fw-semibold"><i class="bi bi-graph-up-arrow me-1"></i> Resumen financiero
+                                </h6>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    Elige un rango de fechas y consulta cuánto entró por ventas, cuánto
+                                    gastaste comprando a proveedores, tu ganancia bruta y neta (ya
+                                    descontando el impuesto estimado), y cuántos productos están vendiéndose
+                                    en pérdida o con un margen muy bajo en ese periodo.
+                                </p>
+
+                                <hr />
+
+                                <h6 class="fw-semibold"><i class="bi bi-cash-stack me-1"></i> Calculadora de precio
+                                    recomendado</h6>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    Escribe cuánto te cuesta un producto (o selecciónalo de tu inventario)
+                                    y el sistema calcula el precio de venta ideal para lograr tu margen
+                                    deseado, sumando el impuesto configurado si lo dejas marcado.
+                                </p>
+
+                                <hr />
+
+                                <h6 class="fw-semibold"><i class="bi bi-percent me-1"></i> Margen vs. Markup: la
+                                    diferencia clave</h6>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    Es el error más común al poner precios, así que léelo con calma:
+                                </p>
+                                <ul class="texto-secundario" style="font-size:0.9rem;">
+                                    <li>
+                                        <strong>Margen</strong> (el que usa este módulo) es el porcentaje de
+                                        ganancia calculado <strong>sobre el precio de venta final</strong>.
+                                    </li>
+                                    <li>
+                                        <strong>Markup</strong> es el porcentaje que le sumas
+                                        <strong>al costo</strong> para llegar al precio de venta.
+                                    </li>
+                                </ul>
+                                <div class="alerta-confirmacion p-3 mb-2">
+                                    <strong>Ejemplo con un costo de $10.000 COP y 30%:</strong><br />
+                                    Margen del 30% → precio de venta = $14.286 (ganas $4.286, el 30% de $14.286).<br />
+                                    Markup del 30% → precio de venta = $13.000 (ganas $3.000, solo el 21% de $13.000).
+                                </div>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    Por eso, si escribes "30%" pensando en markup pero el sistema calcula
+                                    margen, tu precio final será más alto de lo que esperabas — y eso es
+                                    intencional: el margen protege mejor tu ganancia real sobre lo que
+                                    efectivamente cobras.
+                                </p>
+
+                                <hr />
+
+                                <h6 class="fw-semibold"><i class="bi bi-lightbulb me-1"></i> Recomendaciones por
+                                    producto</h6>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    La tabla final revisa cada producto activo de tu inventario y lo
+                                    clasifica en 3 estados:
+                                </p>
+                                <ul style="font-size:0.9rem;">
+                                    <li><span class="insignia-estado estado-bajo">En pérdida</span> — el precio de venta
+                                        actual es menor que el costo: pierdes dinero en cada unidad.</li>
+                                    <li><span class="insignia-estado estado-advertencia">Bajo margen</span> — ganas
+                                        algo, pero menos del margen mínimo saludable que configuraste.</li>
+                                    <li><span class="insignia-estado estado-ok">Saludable</span> — tu margen actual
+                                        cumple o supera el mínimo configurado.</li>
+                                </ul>
+                                <p class="texto-secundario" style="font-size:0.9rem;">
+                                    La columna "Precio recomendado" siempre te muestra a cuánto deberías
+                                    vender ese producto para lograr tu margen deseado, sin importar el
+                                    estado actual.
+                                </p>
+
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-marca" data-bs-dismiss="modal">Entendido</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Bloque: guia rapida "como funciona este modulo" =====
+             Ayuda visual breve, siempre visible, para que el administrador
+             entienda el orden de uso sin necesidad de adivinar. -->
+                <div class="tarjeta-oscura p-3 p-md-4 mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-4 d-flex align-items-start gap-2">
+                            <span class="indicador-kpi flex-shrink-0"><i class="bi bi-1-circle"></i></span>
+                            <div>
+                                <p class="fw-semibold mb-1">Configura tu impuesto y margen</p>
+                                <p class="texto-secundario mb-0" style="font-size:0.85rem;">
+                                    Elige si cobras IVA, INC, otro impuesto o ninguno, y define
+                                    cuánto quieres ganar por cada venta (margen deseado).
+                                </p>
+                            </div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-start gap-2">
+                            <span class="indicador-kpi flex-shrink-0"><i class="bi bi-2-circle"></i></span>
+                            <div>
+                                <p class="fw-semibold mb-1">Revisa el resumen del periodo</p>
+                                <p class="texto-secundario mb-0" style="font-size:0.85rem;">
+                                    Consulta cuánto entró, cuánto gastaste y cuánto ganaste
+                                    realmente en el rango de fechas que elijas.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-start gap-2">
+                            <span class="indicador-kpi flex-shrink-0"><i class="bi bi-3-circle"></i></span>
+                            <div>
+                                <p class="fw-semibold mb-1">Sigue las recomendaciones</p>
+                                <p class="texto-secundario mb-0" style="font-size:0.85rem;">
+                                    La tabla de abajo te dice, producto por producto, si estás
+                                    perdiendo dinero y a cuánto deberías venderlo.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Banner de error general (oculto por defecto) -->
+                <div id="mensaje-error-finanzas" class="alert alert-danger py-2 d-none" role="alert"
+                    aria-live="assertive"></div>
+
+                <!-- ===== Bloque: configuracion de impuestos y margen ===== -->
+                <div class="tarjeta-oscura p-3 p-md-4 mb-4">
+                    <h5 class="marca-sistema mb-1">
+                        <i class="bi bi-percent me-2"></i>Configuración de impuesto y margen
+                    </h5>
+                    <p class="texto-secundario mb-3" style="font-size:0.85rem;">
+                        Esta configuración se aplica automáticamente en el resumen, la
+                        calculadora y las recomendaciones de todo el módulo.
+                    </p>
+                    <form id="formulario-configuracion-financiera">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label" for="select-tipo-impuesto">
+                                    Tipo de impuesto
+                                    <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                        data-bs-placement="top"
+                                        title="El impuesto que le sumas al precio de venta. IVA e INC son los mas comunes en Colombia. Si tu negocio no cobra impuesto, elige 'Sin impuesto'."></i>
+                                </label>
+                                <select class="form-select" id="select-tipo-impuesto" required></select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="campo-porcentaje-impuesto">
+                                    Porcentaje del impuesto (%)
+                                    <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                        data-bs-placement="top"
+                                        title="Que porcentaje de impuesto se le suma al precio de venta. Se sugiere un valor al elegir el tipo, pero puedes cambiarlo si tu tarifa es distinta."></i>
+                                </label>
+                                <input type="number" class="form-control" id="campo-porcentaje-impuesto" min="0"
+                                    max="100" step="0.1" required />
+                            </div>
+                            <!-- Solo visible cuando el tipo de impuesto es "personalizado" -->
+                            <div class="col-md-5 d-none" id="contenedor-nombre-impuesto-personalizado">
+                                <label class="form-label" for="campo-nombre-impuesto-personalizado">
+                                    Nombre del impuesto personalizado
+                                </label>
+                                <input type="text" class="form-control" id="campo-nombre-impuesto-personalizado"
+                                    maxlength="80" placeholder="Ej: Impuesto municipal" />
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="form-label" for="campo-margen-deseado">
+                                    Margen de utilidad deseado (%)
+                                    <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                        data-bs-placement="top"
+                                        title="Cuanto quieres ganar por cada venta, como porcentaje del precio de venta. Ejemplo: con 30% de margen, un producto que cuesta $10.000 se deberia vender en $14.286."></i>
+                                </label>
+                                <input type="number" class="form-control" id="campo-margen-deseado" min="1" max="95"
+                                    step="0.1" required />
+                                <div class="form-text">Se usa por defecto en la calculadora y las recomendaciones.</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="campo-margen-minimo">
+                                    Margen mínimo saludable (%)
+                                    <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                        data-bs-placement="top"
+                                        title="El margen mas bajo que aceptas sin preocuparte. Si un producto vende con menos margen que este valor (pero sin perder dinero), se marcara como 'Bajo margen' en la tabla de recomendaciones."></i>
+                                </label>
+                                <input type="number" class="form-control" id="campo-margen-minimo" min="0" max="95"
+                                    step="0.1" required />
+                                <div class="form-text">Por debajo de este valor se marca "bajo margen".</div>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-marca w-100" id="boton-guardar-configuracion">
+                                    <i class="bi bi-check-circle me-1"></i> Guardar configuración
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ===== Bloque: resumen financiero por periodo ===== -->
+                <div class="tarjeta-oscura p-3 p-md-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+                        <h5 class="marca-sistema mb-0">
+                            <i class="bi bi-graph-up-arrow me-2"></i>Resumen financiero
+                            <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                data-bs-placement="right"
+                                title="Panorama de tu negocio en el rango de fechas elegido: cuanto entro, cuanto gastaste y cuanto ganaste de verdad, ya descontando el impuesto estimado."></i>
+                        </h5>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <input type="date" class="form-control form-control-sm" id="campo-resumen-fecha-inicio" />
+                            <input type="date" class="form-control form-control-sm" id="campo-resumen-fecha-fin" />
+                            <button class="btn btn-sm btn-secundario" id="boton-consultar-resumen">
+                                <i class="bi bi-search me-1"></i> Consultar
+                            </button>
+                        </div>
+                    </div>
+                    <p class="texto-secundario mb-3" style="font-size:0.85rem;">
+                        Si no eliges fechas, se muestran automáticamente los últimos 30 días.
+                    </p>
+
+                    <div id="contenedor-resumen-financiero" class="row g-3" aria-live="polite">
+                        <!-- Tarjetas KPI insertadas dinamicamente desde analisis-financiero.js -->
+                    </div>
+                </div>
+
+                <!-- ===== Bloque: calculadora de precio de venta recomendado ===== -->
+                <div class="tarjeta-oscura p-3 p-md-4 mb-4">
+                    <h5 class="marca-sistema mb-1">
+                        <i class="bi bi-cash-stack me-2"></i>Calculadora de precio de venta recomendado
+                    </h5>
+                    <p class="texto-secundario mb-3" style="font-size:0.85rem;">
+                        Escribe cuánto te cuesta un producto (o elígelo de tu inventario)
+                        y te decimos a cuánto deberías venderlo para ganar el margen que
+                        configuraste, ya incluyendo el impuesto si aplica.
+                    </p>
+                    <form id="formulario-calculadora-precio" class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label" for="campo-costo-compra">Costo de compra (COP)</label>
+                            <input type="number" class="form-control" id="campo-costo-compra" min="0" step="1"
+                                placeholder="Ej: 10000" />
+                            <div class="form-text">O selecciona un producto ya existente al lado.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="select-producto-calculadora">Producto existente
+                                (opcional)</label>
+                            <select class="form-select" id="select-producto-calculadora">
+                                <option value="">-- Ninguno --</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="campo-margen-calculadora">
+                                Margen deseado (%)
+                                <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                    data-bs-placement="top"
+                                    title="Dejalo vacio para usar el margen que configuraste arriba, o escribe uno distinto solo para esta simulacion (ej: 20%, 40% o el que quieras probar)."></i>
+                            </label>
+                            <input type="number" class="form-control" id="campo-margen-calculadora" min="1" max="95"
+                                step="0.1" placeholder="Por defecto" />
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-marca w-100" id="boton-calcular-precio">
+                                <i class="bi bi-calculator me-1"></i> Calcular
+                            </button>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="campo-incluir-impuesto" checked />
+                                <label class="form-check-label" for="campo-incluir-impuesto">
+                                    Incluir impuesto configurado en el precio final
+                                </label>
+                            </div>
+                        </div>
+                    </form>
+
+                    <!-- Resultado del calculo (oculto hasta la primera consulta) -->
+                    <div id="resultado-calculo-precio" class="row g-3 mt-2 d-none"></div>
+                </div>
+
+                <!-- ===== Bloque: analisis de rentabilidad por producto (recomendaciones) ===== -->
+                <div class="tarjeta-oscura p-3 p-md-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                        <h5 class="marca-sistema mb-0">
+                            <i class="bi bi-lightbulb me-2"></i>Recomendaciones por producto
+                        </h5>
+                        <div class="input-group" style="max-width:300px;">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" id="campo-buscar-producto-analisis" class="form-control"
+                                placeholder="Filtrar producto..." />
+                        </div>
+                    </div>
+
+                    <!-- Leyenda breve de los 3 estados posibles, para que el color/etiqueta
+               de cada fila se entienda sin necesidad de pasar el mouse -->
+                    <div class="d-flex flex-wrap gap-3 mb-3" style="font-size:0.82rem;">
+                        <span><span class="insignia-estado estado-bajo">En pérdida</span> vendes más barato que tu
+                            costo</span>
+                        <span><span class="insignia-estado estado-advertencia">Bajo margen</span> ganas menos de lo
+                            saludable</span>
+                        <span><span class="insignia-estado estado-ok">Saludable</span> tu margen actual está bien</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th>Costo</th>
+                                    <th>Precio venta actual</th>
+                                    <th>
+                                        Margen actual
+                                        <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                            data-bs-placement="top"
+                                            title="Que porcentaje de ganancia te deja el precio de venta actual, comparado con el costo del producto."></i>
+                                    </th>
+                                    <th>
+                                        Precio recomendado
+                                        <i class="bi bi-info-circle icono-ayuda" tabindex="0" data-bs-toggle="tooltip"
+                                            data-bs-placement="top"
+                                            title="A cuanto deberias vender este producto para lograr el margen de utilidad deseado que configuraste arriba, incluyendo el impuesto."></i>
+                                    </th>
+                                    <th>Estado</th>
+                                    <th>Recomendación</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cuerpo-tabla-analisis-productos" aria-live="polite">
+                                <!-- Filas insertadas dinamicamente desde analisis-financiero.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 texto-secundario" style="font-size:0.8rem;" id="contador-filas-analisis"></div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS: necesario para los componentes interactivos (incluye
+       Popper, requerido para que los tooltips de ayuda se posicionen bien) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+    <!-- api.js: funciones centralizadas para llamadas al backend y utilidades -->
+    <script src="js/api.js"></script>
+    <!-- sidebar.js: controla mostrar/ocultar la barra lateral en celular -->
+    <script src="js/sidebar.js"></script>
+    <script src="js/suscripcion.js"></script>
+    <!-- analisis-financiero.js: logica del modulo de analisis financiero -->
+    <script src="js/analisis-financiero.js"></script>
+    <script src="js/ui-notificaciones.js"></script>
+    <script src="js/footer.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,42 @@
+# Ruta: backend/requirements.txt
+# Dependencias del backend. Instalar con: pip install -r requirements.txt
+# Las versiones se mantienen fijas (==) para evitar cambios de comportamiento
+# por actualizaciones automáticas.
+
+# --- Framework principal ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# --- Base de datos ---
+sqlalchemy==2.0.35
+# Driver de PostgreSQL (Neon). "binary" incluye la librería nativa, sin compilar.
+psycopg[binary]==3.2.3
+
+# --- Validación de datos ---
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
+
+# --- Seguridad: hashing de contraseñas y JWT ---
+# bcrypt==4.0.1 por compatibilidad con passlib 1.7.4
+bcrypt==4.0.1
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.9
+
+# --- Protección contra fuerza bruta (rate limiting) ---
+slowapi==0.1.9
+
+# --- Variables de entorno ---
+python-dotenv==1.0.1
+
+# --- Generación de reportes ---
+pandas==2.2.3
+openpyxl==3.1.5
+reportlab==4.2.5
+
+# --- Imágenes de productos (valida y recomprime) ---
+Pillow==10.4.0
+
+# --- Códigos QR para vincular dispositivos ---
+qrcode==7.4.2

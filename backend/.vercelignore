@@ -1,0 +1,8 @@
+# Ruta: backend/.vercelignore
+# Archivos que no deben subirse a Vercel (secretos, base local y datos locales)
+.env
+negocio.db
+uploads
+scripts
+__pycache__
+*.pyc

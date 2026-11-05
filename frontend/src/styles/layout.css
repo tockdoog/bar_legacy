@@ -1,0 +1,110 @@
+/* frontend/src/styles/layout.css */
+/* Estructura de las pantallas privadas: barra lateral (escritorio, tablet y
+   móvil), encabezado superior, aviso de suscripción y utilidades comunes
+   (etiquetas, esqueletos de carga, estados vacíos). */
+
+/* --- Contenedor general --- */
+.app-contenedor { display: flex; min-height: 100vh; }
+.app-principal { flex: 1; min-width: 0; margin-left: 260px; display: flex; flex-direction: column; }
+.app-contenido { padding: 22px 26px 40px; outline: 0; }
+
+/* --- Enlace de accesibilidad: visible solo al navegar con teclado --- */
+.saltar-contenido {
+  position: absolute; left: -9999px; top: 8px; z-index: 100;
+  background: var(--dorado); color: var(--blanco); padding: 8px 14px; border-radius: 8px;
+}
+.saltar-contenido:focus { left: 8px; }
+
+/* --- Barra lateral --- */
+.sidebar {
+  position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 50;
+  display: flex; flex-direction: column;
+  background: var(--blanco); border-right: 1px solid var(--gris-suave);
+  transition: transform 0.25s ease, width 0.25s ease;
+  padding-top: env(safe-area-inset-top);
+  overflow-y: auto;
+}
+.sidebar-marca { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; min-height: 68px; }
+.sidebar-marca img { object-fit: contain; border-radius: 8px; }
+.sidebar-marca .titulo-marca { margin: 0; font-size: 1.3rem; }
+.sidebar-cerrar { display: none; margin-left: auto; }
+.sidebar-lista { list-style: none; margin: 0; padding: 6px 12px 20px; display: grid; gap: 4px; }
+
+.sidebar-enlace {
+  position: relative; display: flex; align-items: center; gap: 12px;
+  min-height: 44px; padding: 0 14px; border-radius: 12px;
+  color: var(--texto); text-decoration: none; font-size: 0.93rem; font-weight: 500;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.sidebar-enlace:hover { background: var(--fondo); }
+.sidebar-enlace.activo { background: rgba(201, 162, 39, 0.14); color: var(--dorado-oscuro); font-weight: 600; }
+.sidebar-enlace.activo::before {
+  content: ''; position: absolute; left: -12px; top: 10px; bottom: 10px; width: 4px;
+  border-radius: 0 4px 4px 0; background: var(--dorado);
+}
+.sidebar-enlace svg { flex-shrink: 0; }
+
+/* --- Fondo oscurecido del menú móvil --- */
+.sidebar-fondo { position: fixed; inset: 0; z-index: 40; background: rgba(41, 41, 41, 0.45); }
+
+/* --- Encabezado superior --- */
+.encabezado {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 14px; padding: 12px 26px;
+  background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--gris-suave);
+}
+.encabezado-menu { display: none; }
+.encabezado-titulo { flex: 1; min-width: 0; }
+.encabezado-titulo h1 { font-size: 1.35rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.encabezado-titulo p { margin: 0; text-transform: capitalize; }
+.encabezado-usuario { display: flex; align-items: center; gap: 12px; }
+.encabezado-datos { display: flex; flex-direction: column; text-align: right; font-size: 0.9rem; line-height: 1.25; }
+.boton-compacto { min-height: 40px; padding: 0 14px; font-size: 0.88rem; }
+
+/* --- Aviso de suscripción --- */
+.aviso-suscripcion {
+  display: flex; align-items: center; gap: 10px; padding: 10px 26px;
+  background: rgba(201, 162, 39, 0.16); color: var(--dorado-oscuro); font-size: 0.9rem;
+}
+.aviso-suscripcion.critico { background: rgba(192, 57, 43, 0.12); color: var(--rojo); }
+
+/* --- Utilidades comunes --- */
+.estado-vacio { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 48px 24px; }
+.estado-vacio-simple { padding: 24px 0; text-align: center; }
+.etiqueta { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+.etiqueta.verde { background: rgba(47, 143, 91, 0.14); color: var(--verde); }
+.etiqueta.rojo { background: rgba(192, 57, 43, 0.12); color: var(--rojo); }
+.etiqueta.ambar { background: rgba(201, 162, 39, 0.18); color: var(--dorado-oscuro); }
+.etiqueta.gris { background: var(--gris-suave); color: var(--texto-suave); }
+
+.esqueleto {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #efede6 25%, #f7f5ef 50%, #efede6 75%);
+  background-size: 200% 100%; animation: brillo 1.3s ease-in-out infinite;
+}
+@keyframes brillo { to { background-position: -200% 0; } }
+
+/* --- Tablet: barra lateral compacta, solo iconos --- */
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  .sidebar { width: 76px; }
+  .app-principal { margin-left: 76px; }
+  .sidebar-marca { justify-content: center; padding: 18px 0 14px; }
+  .sidebar-texto-marca, .sidebar-enlace span { display: none; }
+  .sidebar-enlace { justify-content: center; padding: 0; }
+  .sidebar-enlace.activo::before { left: -12px; }
+}
+
+/* --- Móvil: panel deslizante y encabezado compacto --- */
+@media (max-width: 767.98px) {
+  .sidebar { width: 280px; transform: translateX(-100%); box-shadow: 8px 0 30px rgba(0, 0, 0, 0.15); }
+  .sidebar.abierto { transform: translateX(0); }
+  .sidebar-cerrar { display: flex; }
+  .app-principal { margin-left: 0; }
+  .app-contenido { padding: 16px 14px 32px; }
+  .encabezado { padding: 10px 14px; }
+  .encabezado-menu { display: flex; }
+  .encabezado-datos, .solo-escritorio { display: none; }
+  .encabezado-titulo h1 { font-size: 1.15rem; }
+  .aviso-suscripcion { padding: 10px 14px; }
+}

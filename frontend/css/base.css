@@ -1,0 +1,212 @@
+/* Ruta: frontend/css/base.css */
+/* Fundamentos visuales del sistema: paleta de colores (blanco principal,
+   dorado secundario, negro/gris de apoyo), tipografia, reset de fondo,
+   scrollbar, seleccion de texto, foco de teclado accesible y reduccion de
+   movimiento. No depende de ningun nicho de negocio especifico. */
+
+:root {
+  /* --- Paleta de colores principal: blanco (principal) y dorado (secundario) --- */
+  --color-blanco: #ffffff;
+  --color-blanco-hueso: #faf8f3;
+  --color-crema: #f3efe4;
+  --color-dorado: #c9a24b;
+  --color-dorado-oscuro: #a3791f;
+  --color-dorado-brillo: #e0b85c;
+
+  /* --- Colores de apoyo (texto y bordes), nunca dominan la pantalla --- */
+  --color-negro: #1c1c1c;
+  --color-gris-oscuro: #4a4a4a;
+  --color-gris-medio: #8c8c8c;
+  --color-gris-claro: #e6e2d6;
+
+  /* --- Colores de estado (semaforo de usabilidad, faciles de reconocer) --- */
+  --color-exito: #2f8f5b;
+  --color-advertencia: #c9941f;
+  --color-error: #c0392b;
+  --color-info: #2f6fa8;
+
+  /* --- Tipografia --- */
+  --fuente-titulos: "Playfair Display", "Georgia", serif;
+  --fuente-cuerpo: "Poppins", "Segoe UI", sans-serif;
+
+  /* --- Bordes y sombras: sombras suaves de "brillo dorado", no sombras negras duras --- */
+  --radio-borde: 14px;
+  --sombra-suave: 0 4px 18px rgba(28, 28, 28, 0.08);
+  --sombra-dorada: 0 6px 22px rgba(201, 162, 75, 0.35);
+  --sombra-dorada-fuerte: 0 8px 28px rgba(201, 162, 75, 0.5);
+
+  /* --- Duracion estandar de transiciones (consistencia en toda la app) --- */
+  --transicion-rapida: 0.18s ease;
+  --transicion-media: 0.3s ease;
+}
+
+/* Reinicio general y fondo base de toda la aplicacion: blanco con un toque
+   calido de crema, y un leve resplandor dorado en la esquina (detalle premium) */
+body {
+  background-color: var(--color-blanco);
+  background-image: radial-gradient(circle at top right, var(--color-crema) 0%, var(--color-blanco) 55%);
+  color: var(--color-negro);
+  font-family: var(--fuente-cuerpo);
+  min-height: 100vh;
+}
+
+/* Titulos con la fuente serif elegante, usados con moderacion */
+h1, h2, h3, .titulo-marca {
+  font-family: var(--fuente-titulos);
+  color: var(--color-negro);
+}
+
+/* Iconos (Bootstrap Icons) dentro de encabezados de seccion: tono dorado para
+   reforzar la identidad de marca sin necesidad de imagenes ni iconos de nicho */
+h5 > i:first-child,
+h2.marca-sistema > i:first-child {
+  color: var(--color-dorado-oscuro);
+}
+
+/* --- Scrollbar personalizada: refuerza la identidad visual dorada --- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-blanco-hueso);
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--color-dorado), var(--color-dorado-oscuro));
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-dorado-brillo);
+}
+
+/* --- Seleccion de texto con acento de marca --- */
+::selection {
+  background: var(--color-dorado);
+  color: var(--color-blanco);
+}
+
+/* --- Foco de teclado visible (accesibilidad y buena practica de seguridad de
+       navegacion): nunca eliminar el outline sin reemplazo --- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+.nav-link:focus-visible,
+.tarjeta-mesa:focus-visible,
+.tarjeta-producto-pos:focus-visible {
+  outline: 2px solid var(--color-dorado-oscuro);
+  outline-offset: 2px;
+}
+
+/* --- Respeta la preferencia del sistema de reducir animaciones --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* --- Marca / logotipo de texto del sistema --- */
+.marca-sistema {
+  font-family: var(--fuente-titulos);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-negro);
+}
+.marca-sistema span {
+  color: var(--color-dorado-oscuro);
+}
+
+/* --- Utilidad: texto en color gris secundario (sobre fondo blanco) --- */
+.texto-secundario {
+  color: var(--color-gris-oscuro);
+  opacity: 0.9;
+}
+
+/* --- Texto de alerta / mensajes de error genericos --- */
+.mensaje-error {
+  color: var(--color-error);
+  font-size: 0.9rem;
+}
+
+/* --- Linea divisoria fina con degradado dorado (detalle de marca) --- */
+.divisor-dorado {
+  height: 2px;
+  width: 60px;
+  background: linear-gradient(90deg, var(--color-dorado), transparent);
+  border: none;
+}
+
+/* --- Animacion generica de entrada suave, reutilizada por varios componentes --- */
+@keyframes apareceSuave {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animacion-entrada {
+  animation: apareceSuave var(--transicion-media) ease forwards;
+}
+
+/* --- Pie de marca del proveedor (SoftLegacy): fijo en la esquina inferior
+   derecha, discreto, no interfiere con el layout de ninguna pagina.
+   Se inserta por JS desde frontend/js/footer.js. --- */
+.pie-marca-softlegacy {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1040; /* debajo de modales de Bootstrap (1050+), encima del contenido normal */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-blanco);
+  border: 1px solid var(--color-gris-claro);
+  border-radius: 999px;
+  padding: 5px 10px;
+  box-shadow: var(--sombra-suave);
+  font-family: var(--fuente-cuerpo);
+  font-size: 0.75rem;
+}
+
+.pie-marca-enlace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--color-gris-oscuro);
+}
+
+.pie-marca-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.pie-marca-texto {
+  font-weight: 600;
+  color: var(--color-gris-oscuro);
+}
+
+.pie-marca-icono {
+  color: var(--color-gris-medio);
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: color var(--transicion-rapida);
+}
+
+.pie-marca-icono:hover,
+.pie-marca-enlace:hover .pie-marca-texto {
+  color: var(--color-dorado-oscuro);
+}
+
+/* En celular se reduce un poco para no tapar contenido en pantallas pequeñas */
+@media (max-width: 575.98px) {
+  .pie-marca-softlegacy {
+    padding: 4px 8px;
+    gap: 6px;
+    bottom: 8px;
+    right: 8px;
+  }
+  .pie-marca-logo {
+    width: 16px;
+    height: 16px;
+  }
+}

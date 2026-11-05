@@ -1,0 +1,87 @@
+/* frontend/src/styles/dashboard.css */
+/* Estilos del Dashboard: rejillas de tarjetas, indicadores, gráfica,
+   ranking de productos, listas y accesos rápidos. Se adaptan solos a
+   escritorio, tablet y móvil con rejillas flexibles. */
+
+.dash { display: grid; gap: 20px; }
+.dash h3 { font-size: 1.05rem; margin: 0 0 12px; }
+
+.dash-saludo { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dash-saludo h2 { margin: 0; font-size: 1.6rem; }
+.dash-saludo p { margin: 2px 0 0; }
+
+.tarjeta-compacta { padding: 18px; }
+
+/* --- Alertas --- */
+.dash-alertas {
+  display: grid; gap: 6px; padding: 12px 16px; border-radius: var(--radio);
+  background: rgba(201, 162, 39, 0.14); border: 1px solid rgba(201, 162, 39, 0.4); color: var(--dorado-oscuro);
+}
+.dash-alertas p { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 500; }
+
+/* --- Tarjetas de indicadores --- */
+.dash-estadisticas { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.estadistica-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.88rem; }
+.estadistica-icono { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; }
+.tono-dorado { background: rgba(201, 162, 39, 0.16); color: var(--dorado-oscuro); }
+.tono-verde { background: rgba(47, 143, 91, 0.14); color: var(--verde); }
+.tono-rojo { background: rgba(192, 57, 43, 0.12); color: var(--rojo); }
+.estadistica-valor { display: block; margin: 8px 0 6px; font-family: var(--fuente-titulos); font-size: 1.65rem; line-height: 1.15; }
+.estadistica-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.82rem; }
+.variacion { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.variacion.sube { color: var(--verde); }
+.variacion.baja { color: var(--rojo); }
+
+/* --- Dos columnas que se apilan en pantallas pequeñas --- */
+.dash-dos-columnas { display: grid; gap: 14px; grid-template-columns: 1.6fr 1fr; align-items: start; }
+.dash-seccion-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.dash-seccion-cabecera h3 { margin: 0; }
+
+.selector-periodo { display: inline-flex; border: 1px solid var(--gris-suave); border-radius: 10px; overflow: hidden; }
+.selector-periodo button {
+  border: 0; background: var(--blanco); padding: 6px 12px; min-height: 34px;
+  font: 500 0.82rem var(--fuente-cuerpo); cursor: pointer; color: var(--texto-suave);
+}
+.selector-periodo button.activo { background: var(--dorado); color: var(--blanco); }
+
+/* --- Gráfica --- */
+.grafica { width: 100%; height: auto; display: block; }
+.grafica-guia { stroke: var(--gris-suave); stroke-width: 1; stroke-dasharray: 4 4; }
+.grafica-barra { fill: var(--dorado); transition: fill 0.18s ease; }
+.grafica-barra:hover { fill: var(--dorado-oscuro); }
+.grafica-texto { fill: var(--texto-suave); font-size: 11px; font-family: var(--fuente-cuerpo); }
+
+/* --- Ranking de más vendidos --- */
+.lista-ranking { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ranking-linea { display: flex; justify-content: space-between; gap: 10px; font-size: 0.9rem; margin-bottom: 4px; }
+.ranking-barra { height: 8px; border-radius: 999px; background: var(--gris-suave); overflow: hidden; }
+.ranking-barra span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--dorado), var(--dorado-oscuro)); }
+
+/* --- Listas simples --- */
+.lista-simple { list-style: none; margin: 0; padding: 0; }
+.lista-simple li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--gris-suave); font-size: 0.9rem;
+}
+.lista-simple li:last-child { border-bottom: 0; }
+
+/* --- Accesos rápidos --- */
+.dash-accesos { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.acceso-rapido {
+  display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 0 18px;
+  background: var(--blanco); border: 1px solid var(--gris-suave); border-radius: var(--radio);
+  color: var(--texto); text-decoration: none; font-weight: 600;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+}
+.acceso-rapido svg:first-child { color: var(--dorado-oscuro); }
+.acceso-rapido span { flex: 1; }
+.acceso-rapido:hover { border-color: var(--dorado); box-shadow: var(--sombra); transform: translateY(-2px); }
+
+@media (max-width: 899.98px) {
+  .dash-dos-columnas { grid-template-columns: 1fr; }
+}
+@media (max-width: 479.98px) {
+  .dash-estadisticas { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .estadistica-valor { font-size: 1.25rem; }
+  .tarjeta-compacta { padding: 14px; }
+}

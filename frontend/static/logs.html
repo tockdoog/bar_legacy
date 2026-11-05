@@ -1,0 +1,141 @@
+<!-- Ruta: frontend/logs.html -->
+<!-- Panel interno de monitoreo: muestra los logs de accesos, seguridad, errores,
+     sistema y negocio guardados en ~/logs, junto con un Centro de Alertas que
+     agrupa los problemas detectados y sugiere qué hacer en cada caso. Requiere
+     rol de administrador y una segunda clave especial definida en el .env. -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <title>Monitoreo del Sistema</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet" referrerpolicy="no-referrer" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link href="css/styles.css" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- ===== Panel de bloqueo: se muestra ANTES que cualquier contenido de logs.
+       Exige la clave especial del panel (independiente de la contraseña normal
+       del usuario). Se oculta solo tras una verificación exitosa en el backend. ===== -->
+  <div id="panel-clave-logs" class="d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="tarjeta-oscura p-4 p-md-5" style="max-width: 420px; width: 100%;">
+      <div class="text-center mb-4">
+        <i class="bi bi-shield-lock fs-1 mb-2 d-block" style="color: var(--color-marca, #c9941f);"></i>
+        <h4 class="marca-sistema mb-1">Acceso <span>restringido</span></h4>
+        <p class="texto-secundario mb-0">Ingresa la clave del panel de monitoreo para continuar</p>
+      </div>
+
+      <div id="mensaje-error-clave" class="alert alert-danger py-2 d-none" role="alert" aria-live="assertive"></div>
+
+      <form id="formulario-clave-logs" autocomplete="off">
+        <div class="mb-3">
+          <label for="campo-clave-logs" class="form-label">Clave de acceso</label>
+          <input
+            type="password"
+            id="campo-clave-logs"
+            class="form-control"
+            required
+            autocomplete="new-password"
+            aria-describedby="mensaje-error-clave"
+          />
+        </div>
+        <button type="submit" id="boton-verificar-clave" class="btn btn-marca w-100">
+          <i class="bi bi-unlock me-1"></i> Ingresar
+        </button>
+        <a href="dashboard.html" class="btn btn-secundario w-100 mt-2">Volver al panel</a>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== Contenido real del panel de monitoreo, oculto hasta verificar la clave ===== -->
+  <div id="contenido-logs" class="d-none">
+    <nav class="navbar navbar-dark bg-dark px-3">
+      <span class="navbar-brand mb-0 h1">Monitoreo del Sistema</span>
+      <div>
+        <a href="dashboard.html" class="btn btn-outline-light btn-sm">Volver al panel</a>
+        <button id="boton-cerrar-sesion" class="btn btn-outline-danger btn-sm">Cerrar sesión</button>
+      </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+      <!-- Mensaje de error general (ej. no tiene permisos o la clave expiró) -->
+      <div id="mensaje-error" class="alert alert-danger d-none"></div>
+
+      <!-- ===== Centro de Alertas: agrupa los problemas detectados con su
+           recomendación de qué hacer y dónde, en vez de mostrar la misma
+           sugerencia repetida por cada línea del log. ===== -->
+      <div class="tarjeta-oscura p-3 p-md-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="mb-0"><i class="bi bi-shield-exclamation me-2"></i>Centro de alertas y recomendaciones</h5>
+          <button id="boton-actualizar-alertas" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+          </button>
+        </div>
+        <div id="contenedor-alertas">
+          <!-- Se llena dinámicamente desde logs.js -->
+          <p class="texto-secundario mb-0">Cargando alertas...</p>
+        </div>
+      </div>
+
+      <!-- Tarjetas de resumen por categoría -->
+      <div class="row mb-4" id="contenedor-resumen">
+        <!-- Se llenan dinámicamente desde logs.js -->
+      </div>
+
+      <!-- Controles de filtro -->
+      <div class="row g-2 mb-3">
+        <div class="col-md-3">
+          <select id="selector-categoria" class="form-select">
+            <option value="negocio">Negocio (precios, ventas, caja, devoluciones)</option>
+            <option value="seguridad">Seguridad (sospechosos)</option>
+            <option value="errores">Errores</option>
+            <option value="accesos">Accesos</option>
+            <option value="sistema">Sistema</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <input type="text" id="campo-busqueda" class="form-control" placeholder="Buscar texto dentro del log..." />
+        </div>
+        <div class="col-md-2">
+          <select id="selector-cantidad" class="form-select">
+            <option value="100">Últimas 100</option>
+            <option value="200" selected>Últimas 200</option>
+            <option value="500">Últimas 500</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button id="boton-consultar" class="btn btn-primary w-100">Consultar</button>
+        </div>
+        <div class="col-md-2">
+          <button id="boton-descargar" class="btn btn-outline-secondary w-100">Descargar .log</button>
+        </div>
+      </div>
+
+      <!-- Tabla de resultados -->
+      <div class="table-responsive">
+        <table class="table table-striped table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="width: 160px;">Fecha y hora</th>
+              <th style="width: 110px;">Nivel</th>
+              <th>Mensaje</th>
+              <th style="width: 320px;">Recomendación</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo-tabla-logs">
+            <!-- Se llena dinámicamente desde logs.js -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="js/api.js"></script>
+  <script src="js/logs.js"></script>
+</body>
+</html>

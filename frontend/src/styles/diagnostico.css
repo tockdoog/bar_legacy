@@ -1,0 +1,18 @@
+/* frontend/src/styles/diagnostico.css */
+/* Estilos de la ruta de pruebas (/test): lista de comprobaciones con estado,
+   detalle y tiempo de respuesta. Responsive: en móvil el tiempo pasa debajo. */
+
+.diag-pagina { min-height: 100vh; padding: 24px 14px; display: flex; justify-content: center; align-items: flex-start; }
+.diag-tarjeta { width: 100%; max-width: 760px; }
+.diag-resumen { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.diag-lista { list-style: none; margin: 0; padding: 0; }
+.diag-fila {
+  display: flex; align-items: flex-start; gap: 12px; padding: 12px 0;
+  border-bottom: 1px solid var(--gris-suave);
+}
+.diag-icono { flex-shrink: 0; margin-top: 2px; }
+.diag-texto { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 0.92rem; }
+.diag-texto .texto-suave { word-break: break-word; }
+.diag-ms { flex-shrink: 0; font-size: 0.78rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.diag-acciones { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.diag-acciones .boton { text-decoration: none; }

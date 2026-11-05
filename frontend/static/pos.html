@@ -1,0 +1,806 @@
+<!-- Ruta: frontend/pos.html -->
+<!-- Modulo de Punto de Venta (POS): plano visual del salon con soporte de
+     multiples pisos, elementos decorativos (TV, zona de juegos, barra, planta,
+     entrada, punto de referencia), vista 3D ajustable, venta rapida, carrito
+     de compra, cobro que admite factura partida (uno o varios metodos de
+     pago combinados, ej. mitad efectivo y mitad Nequi), un historial de
+     ventas ya cobradas para buscarlas y anularlas si el cliente cambia de
+     opinion despues de haberse generado la factura (repone stock y deja
+     registro de quien anulo, cuando y por que, visible tambien en Logs y
+     Reportes), facturacion (tirilla, PDF, WhatsApp, correo), y escanador de
+     codigos de barras. La posicion, forma, piso y angulo 3D de cada elemento
+     se guardan en localStorage; el estado real de cada mesa
+     (libre/ocupada/pendiente) y sus datos viven en la API FastAPI, que sigue
+     siendo la fuente de verdad. Ademas, cada mesa tiene un BLOQUEO
+     COLABORATIVO EN TIEMPO REAL (WebSocket, ver js/mesas-realtime.js): al
+     abrirla queda reservada para el usuario que la esta atendiendo, y los
+     demas ven al instante quien la tiene y desde cuando, sin recargar la
+     pagina. No depende de ningun nicho de negocio especifico. Precios en
+     pesos colombianos (COP). -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Previene que el navegador interprete archivos con un MIME diferente al declarado -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <title>Punto de venta | Sistema de Administracion</title>
+
+  <link rel="icon" type="image/png" href="/imagenes/logo.png" />
+  <link rel="shortcut icon" type="image/png" href="/imagenes/logo.png" />
+  <!-- Bootstrap CSS: framework de estilos y componentes UI -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- Fuentes tipograficas del sistema -->
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@300;400;500;600&display=swap"
+        rel="stylesheet" referrerpolicy="no-referrer" />
+  <!-- Bootstrap Icons: iconos vectoriales -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+        rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <!-- Hoja de estilos personalizada del sistema -->
+  <link href="css/styles.css" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- ===== Barra superior, visible solo en celular/tablet: marca del sistema
+       y boton de hamburguesa que abre la barra lateral (js/sidebar.js) ===== -->
+  <header class="barra-superior-movil d-md-none d-flex align-items-center justify-content-between px-3 py-2">
+    <div class="marca-sistema fs-5 mb-0">Mi<span>Negocio</span></div>
+    <button id="boton-alternar-sidebar" class="boton-hamburguesa" type="button"
+            aria-label="Abrir menú de navegación" aria-expanded="false"
+            aria-controls="barra-lateral-navegacion">
+      <i class="bi bi-list"></i>
+    </button>
+  </header>
+
+  <!-- Fondo oscuro detras de la barra lateral cuando esta abierta en celular -->
+  <div id="fondo-sidebar-movil" class="fondo-sidebar-movil"></div>
+
+  <div class="container-fluid">
+    <div class="row">
+
+      <!-- ===== Barra lateral de navegacion ===== -->
+      <nav id="barra-lateral-navegacion" class="col-12 col-md-3 col-xl-2 barra-lateral p-3 d-flex flex-column">
+        <!-- Encabezado propio de la barra en celular: marca + boton de cerrar -->
+        <div class="encabezado-sidebar-movil mb-3">
+          <div class="marca-sistema fs-5 mb-0">Mi<span>Negocio</span></div>
+          <button id="boton-cerrar-sidebar-movil" class="boton-hamburguesa" type="button"
+                  aria-label="Cerrar menú de navegación">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+
+        <div class="marca-sistema fs-4 mb-4 px-2 d-none d-md-block">Mi<span>Negocio</span></div>
+        <ul class="nav nav-pills flex-column gap-1">
+          <li class="nav-item">
+            <a class="nav-link" href="dashboard.html">
+              <i class="bi bi-grid-1x2 me-2"></i>Panel principal
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="inventario.html">
+              <i class="bi bi-box-seam me-2"></i>Inventario
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link active" href="pos.html">
+              <i class="bi bi-cash-coin me-2"></i>Punto de venta
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="compras.html">
+              <i class="bi bi-truck me-2"></i>Proveedores
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="promociones.html">
+              <i class="bi bi-stars me-2"></i>Promociones
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="reportes.html">
+              <i class="bi bi-bar-chart-line me-2"></i>Reportes
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="usuarios.html">
+              <i class="bi bi-people me-2"></i>Usuarios
+            </a>
+          </li>
+          <li class="nav-item">
+              <a class="nav-link" href="analisis-financiero.html"><i class="bi bi-calculator me-2"></i>Análisis financiero</a>
+          </li>
+          <li class="nav-item">
+          </li>
+        </ul>
+
+        <!-- Seccion de sesion activa con boton de cierre de sesion -->
+        <div class="mt-auto pt-3 border-top">
+          <p class="texto-secundario mb-1" style="font-size: 0.8rem;">Sesion activa</p>
+          <p class="mb-2 fw-semibold" id="texto-nombre-usuario">—</p>
+          <button id="boton-cerrar-sesion" class="btn btn-secundario btn-sm w-100"
+                  aria-label="Cerrar sesion actual">
+            <i class="bi bi-box-arrow-right me-1"></i> Cerrar sesion
+          </button>
+        </div>
+      </nav>
+
+      <!-- ===== Contenido principal ===== -->
+      <main class="col-12 col-md-9 col-xl-10 p-4">
+
+        <!-- Banner de error general del POS (oculto por defecto) -->
+        <div id="mensaje-error-pos" class="alert alert-danger py-2 d-none"
+             role="alert" aria-live="assertive"></div>
+
+        <!-- ===================== VISTA 1: PLANO DEL SALON =====================
+             Muestra el lienzo con las fichas de mesa y elementos decorativos
+             posicionados libremente, organizados por piso. El estado de cada
+             mesa viene de la API; la posicion/forma/piso/elementos y el
+             angulo 3D se guardan en localStorage del navegador. Cada ficha
+             tambien puede mostrar una insignia de "bloqueo" (quien la esta
+             atendiendo en tiempo real), sincronizada por WebSocket. -->
+        <section id="vista-mesas">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+              <h2 class="marca-sistema mb-0">
+                <i class="bi bi-cash-coin me-2"></i>Punto de <span>venta</span>
+              </h2>
+              <p class="texto-secundario mb-0">
+                Toca una mesa para abrir o continuar su venta
+              </p>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+              <!-- Boton para abrir el modal de creacion de nueva mesa -->
+              <button class="btn btn-secundario"
+                      data-bs-toggle="modal" data-bs-target="#modalNuevaMesa">
+                <i class="bi bi-plus-lg me-1"></i> Nueva mesa
+              </button>
+              <!-- Boton que abre el historial de ventas cobradas/anuladas para
+                   buscar una venta reciente y anularla si el cliente se
+                   arrepintio despues de que la factura ya se genero -->
+              <button class="btn btn-secundario" id="boton-historial-ventas" type="button"
+                      data-bs-toggle="modal" data-bs-target="#modalHistorialVentas">
+                <i class="bi bi-clock-history me-1"></i> Ventas cobradas
+              </button>
+              <!-- Boton de venta rapida: abre un carrito sin mesa asociada -->
+              <button class="btn btn-marca" id="boton-venta-rapida" type="button">
+                <i class="bi bi-lightning-charge me-1"></i> Venta rapida
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de resumen de estados (semaforo) e interruptor de organizacion del plano.
+               El contenido inicial queda vacio: pos.js dibuja el skeleton de las
+               3 pastillas apenas arranca cargarMesas(), antes de recibir la API. -->
+          <div class="tarjeta-oscura p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+              <div class="barra-resumen-mesas" id="barra-resumen-mesas" aria-live="polite"></div>
+              <!-- Interruptor para activar el modo de arrastre de mesas y elementos -->
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox"
+                       id="interruptor-organizar-salon" />
+                <label class="form-check-label texto-secundario"
+                       for="interruptor-organizar-salon">
+                  <i class="bi bi-arrows-move me-1"></i>Organizar salon (arrastrar)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Aviso contextual visible solo cuando el modo organizar esta activo -->
+          <div id="aviso-modo-organizar" class="alert py-2 d-none"
+               style="background:var(--color-crema);border:1px solid var(--color-dorado);
+                      color:var(--color-gris-oscuro);">
+            <i class="bi bi-info-circle me-1"></i>
+            Arrastra cada mesa o elemento a su lugar en el plano. Los cambios se guardan
+            automaticamente en este dispositivo.
+          </div>
+
+          <!-- Pestañas de piso, paleta de elementos decorativos y controles de vista 3D -->
+          <div class="tarjeta-oscura p-3 mb-3">
+            <!-- Pestañas de piso + acceso al modal de gestion de pisos -->
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+              <div class="barra-pisos" id="barra-pisos" aria-label="Selector de piso"></div>
+              <button class="btn btn-secundario btn-sm" type="button"
+                      data-bs-toggle="modal" data-bs-target="#modalGestionPisos">
+                <i class="bi bi-diagram-3 me-1"></i> Gestionar pisos
+              </button>
+            </div>
+
+            <!-- Paleta de elementos decorativos (visible solo en modo organizar)
+                 y controles de vista 3D (interruptor + inclinacion ajustable) -->
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+              <div class="paleta-elementos d-none" id="paleta-elementos"
+                   aria-label="Agregar elemento decorativo al plano"></div>
+
+              <div class="d-flex align-items-center gap-3 flex-wrap">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="interruptor-vista-3d" />
+                  <label class="form-check-label texto-secundario" for="interruptor-vista-3d">
+                    <i class="bi bi-badge-3d me-1"></i>Vista 3D
+                  </label>
+                </div>
+                <div class="control-inclinacion d-none" id="control-inclinacion">
+                  <label for="campo-inclinacion-3d" class="texto-secundario" style="font-size:0.78rem;">
+                    Inclinacion
+                  </label>
+                  <input type="range" class="form-range" id="campo-inclinacion-3d"
+                         min="0" max="55" step="1" value="38" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Lienzo del plano: superficie con cuadricula donde se ubican mesas y elementos -->
+          <div id="lienzo-plano" class="lienzo-plano" aria-live="polite">
+            <!-- Capa que recibe la inclinacion 3D; el scroll y tamaño los controla el lienzo.
+                 Las fichas de mesa reales, el skeleton de carga y el estado vacio se
+                 insertan aqui dinamicamente desde pos.js; solo la zona de caja es fija. -->
+            <div id="capa-plano" class="capa-plano">
+              <!-- Zona de caja: referencia fija decorativa, no es una mesa real -->
+              <div class="zona-caja" id="zona-caja" style="left: 16px; top: 16px;">
+                <i class="bi bi-shop"></i>
+                <span>CAJA</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== VISTA 2: CARRITO DE LA VENTA ACTIVA =====================
+             Se muestra al seleccionar una mesa o al iniciar una venta rapida.
+             Permite buscar productos, escanear codigos de barras, gestionar el
+             carrito y cobrar la venta al cliente. -->
+        <section id="vista-carrito" class="d-none">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+              <!-- El titulo se actualiza dinamicamente con "Mesa X" o "Venta rapida" -->
+              <h2 class="marca-sistema mb-0" id="titulo-venta-activa">
+                Venta <span>rapida</span>
+              </h2>
+              <p class="texto-secundario mb-0">
+                Selecciona productos para agregarlos al carrito
+              </p>
+            </div>
+            <!-- Boton para volver al plano del salon (cancela la venta rapida si estaba abierta) -->
+            <button class="btn btn-secundario" id="boton-volver-mesas" type="button">
+              <i class="bi bi-arrow-left me-1"></i> Volver al salon
+            </button>
+          </div>
+
+          <div class="row g-3">
+            <!-- ===== Columna izquierda: buscador, escanador y grilla de productos ===== -->
+            <div class="col-lg-7">
+
+              <!-- Tarjetas de promociones activas en carrusel horizontal -->
+              <div id="contenedor-promociones-pos" class="d-flex gap-2 mb-3"
+                   style="overflow-x: auto;"></div>
+
+              <!-- Barra de busqueda con boton de escanador de camara integrado -->
+              <div class="tarjeta-oscura p-3 mb-3">
+                <div class="input-group">
+                  <span class="input-group-text" id="label-buscar-pos">
+                    <i class="bi bi-upc-scan"></i>
+                  </span>
+                  <input
+                    type="text"
+                    id="campo-buscar-producto-pos"
+                    class="form-control"
+                    placeholder="Buscar o escanear codigo de barras y presionar Enter..."
+                    aria-labelledby="label-buscar-pos"
+                  />
+                  <!-- Boton de camara: abre el escanador para agregar producto al carrito -->
+                  <button type="button" class="btn btn-marca" id="boton-escanear-pos"
+                          title="Abrir escanador de camara para agregar un producto al carrito"
+                          aria-label="Escanear codigo de barras con la camara">
+                    <i class="bi bi-camera-video"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Grilla de tarjetas de producto seleccionables (con foto si tiene).
+                   El contenido inicial queda vacio: pos.js dibuja el skeleton de
+                   tarjetas apenas arranca cargarProductos(), antes de recibir la API. -->
+              <div id="contenedor-productos-pos" class="row g-2" aria-live="polite"></div>
+            </div>
+
+            <!-- ===== Columna derecha: carrito de la venta actual ===== -->
+            <div class="col-lg-5">
+              <div class="tarjeta-oscura p-3 d-flex flex-column" style="min-height: 420px;">
+                <h5 class="mb-3"><i class="bi bi-cart3 me-2"></i>Carrito</h5>
+
+                <!-- Lista de items del carrito con controles de cantidad -->
+                <div id="contenedor-items-carrito" class="flex-grow-1"
+                     style="overflow-y: auto; max-height: 360px;" aria-live="polite">
+                  <p class="texto-secundario">El carrito esta vacio.</p>
+                </div>
+
+                <hr />
+
+                <!-- Total calculado por el backend (nunca por el navegador, para
+                     evitar manipulacion del monto final a cobrar) -->
+                <div class="d-flex justify-content-between fs-4 mb-3">
+                  <span>Total</span>
+                  <span id="texto-total-carrito" class="fw-bold">$ 0</span>
+                </div>
+
+                <!-- Acciones principales: pedir cuenta o cobrar -->
+                <div class="d-flex gap-2">
+                  <button class="btn btn-secundario w-50" id="boton-pedir-cuenta" type="button">
+                    <i class="bi bi-receipt me-1"></i> Pedir cuenta
+                  </button>
+                  <button class="btn btn-marca w-50" id="boton-cobrar" type="button"
+                          data-bs-toggle="modal" data-bs-target="#modalCobrar">
+                    <i class="bi bi-cash-stack me-1"></i> Cobrar
+                  </button>
+                </div>
+
+                <!-- Boton para cancelar completamente la venta activa -->
+                <button class="btn btn-outline-danger btn-sm w-100 mt-2"
+                        id="boton-cancelar-venta" type="button">
+                  Cancelar venta
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ===== Modal: crear nueva mesa ===== -->
+  <div class="modal fade" id="modalNuevaMesa" tabindex="-1"
+       aria-labelledby="titulo-modal-mesa" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-mesa">
+            Nueva <span>mesa</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <form id="formulario-nueva-mesa">
+          <div class="modal-body">
+            <!-- Numero o nombre identificador de la mesa -->
+            <label class="form-label" for="campo-numero-mesa">
+              Numero o nombre de la mesa
+            </label>
+            <input type="text" class="form-control" id="campo-numero-mesa"
+                   placeholder="Ej: 1, 2, Terraza 1..." required maxlength="40" />
+
+            <!-- Forma visual de la ficha en el plano (redonda o cuadrada) -->
+            <label class="form-label mt-3 d-block">Forma en el plano</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="forma-nueva-mesa" id="forma-nueva-redonda"
+                       value="redonda" checked />
+                <label class="form-check-label" for="forma-nueva-redonda">
+                  <i class="bi bi-circle me-1"></i>Redonda
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="forma-nueva-mesa" id="forma-nueva-cuadrada"
+                       value="cuadrada" />
+                <label class="form-check-label" for="forma-nueva-cuadrada">
+                  <i class="bi bi-square me-1"></i>Cuadrada
+                </label>
+              </div>
+            </div>
+
+            <!-- Alerta de error del modal de nueva mesa -->
+            <div id="mensaje-error-modal-mesa"
+                 class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+          </div>
+          <div class="modal-footer border-0">
+            <button type="button" class="btn btn-secundario"
+                    data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-marca">Crear mesa</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: editar mesa existente (numero y forma en el plano) ===== -->
+  <div class="modal fade" id="modalEditarMesa" tabindex="-1"
+       aria-labelledby="titulo-modal-editar-mesa" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-editar-mesa">
+            Editar <span>mesa</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <form id="formulario-editar-mesa">
+          <div class="modal-body">
+            <!-- Campo oculto con el id de la mesa que se esta editando -->
+            <input type="hidden" id="editar-mesa-id" />
+
+            <!-- Numero o nombre de la mesa (se envia al backend via API) -->
+            <label class="form-label" for="editar-mesa-numero">
+              Numero o nombre de la mesa
+            </label>
+            <input type="text" class="form-control" id="editar-mesa-numero" required maxlength="40" />
+
+            <!-- Forma visual (se guarda en localStorage, no en el backend) -->
+            <label class="form-label mt-3 d-block">Forma en el plano</label>
+            <div class="d-flex gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="forma-editar-mesa" id="forma-editar-redonda" value="redonda" />
+                <label class="form-check-label" for="forma-editar-redonda">
+                  <i class="bi bi-circle me-1"></i>Redonda
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio"
+                       name="forma-editar-mesa" id="forma-editar-cuadrada" value="cuadrada" />
+                <label class="form-check-label" for="forma-editar-cuadrada">
+                  <i class="bi bi-square me-1"></i>Cuadrada
+                </label>
+              </div>
+            </div>
+
+            <!-- Alerta de error del modal de edicion de mesa -->
+            <div id="mensaje-error-modal-editar-mesa"
+                 class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+          </div>
+          <div class="modal-footer border-0">
+            <button type="button" class="btn btn-secundario"
+                    data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-marca">Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: gestionar pisos (crear, renombrar, eliminar) ===== -->
+  <div class="modal fade" id="modalGestionPisos" tabindex="-1"
+       aria-labelledby="titulo-modal-pisos" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-pisos">
+            Gestionar <span>pisos</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="texto-secundario mb-2" style="font-size: 0.85rem;">
+            Cada piso tiene su propio plano, mesas y elementos decorativos. Al eliminar
+            un piso, sus mesas y elementos pasan automaticamente al primer piso restante.
+            Escribe el nuevo nombre y presiona Enter o el boton ✓ para guardar.
+          </p>
+          <div id="lista-pisos-gestion" class="mb-3"></div>
+          <hr />
+          <form id="formulario-nuevo-piso" class="d-flex gap-2">
+            <input type="text" class="form-control" id="campo-nuevo-piso-nombre"
+                   placeholder="Ej: Terraza, 2do piso..." maxlength="40" required />
+            <button type="submit" class="btn btn-marca"><i class="bi bi-plus-lg"></i></button>
+          </form>
+          <div id="mensaje-error-modal-pisos" class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: cobrar venta activa (soporta factura partida) =====
+       En vez de un unico selector de metodo + monto, ahora se agregan uno o
+       varios "pagos" a una lista (metodo + monto cada uno). El boton de
+       confirmar solo se habilita cuando la suma de los pagos agregados cubre
+       el total de la venta. Esto permite, por ejemplo, cobrar la mitad en
+       efectivo y la mitad en Nequi sin ninguna limitacion de cantidad de
+       metodos combinados (hasta 6, ver backend PagoVenta.pagos). -->
+  <div class="modal fade" id="modalCobrar" tabindex="-1"
+       aria-labelledby="titulo-modal-cobrar" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-cobrar">
+            Cobrar <span>venta</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Total a pagar calculado por el backend -->
+          <div class="d-flex justify-content-between mb-3 fs-5">
+            <span class="texto-secundario">Total a pagar</span>
+            <span class="fw-bold" id="texto-total-modal-cobrar">$ 0</span>
+          </div>
+
+          <!-- Controles para agregar un pago a la lista. Las opciones (value)
+               del selector deben coincidir exactamente con los valores del
+               enum MetodoPago del backend (app/models/venta.py), ya que
+               Pydantic valida ese texto en /pagar. -->
+          <label class="form-label mb-1">Agregar un pago</label>
+          <div class="d-flex gap-2 mb-2">
+            <select class="form-select" id="campo-metodo-pago-nuevo" style="max-width:180px;">
+              <option value="efectivo">Efectivo</option>
+              <option value="nequi">Nequi</option>
+              <option value="daviplata">Daviplata</option>
+              <option value="bancolombia">Bancolombia</option>
+              <option value="tarjeta_debito">Tarjeta débito</option>
+              <option value="tarjeta_credito">Tarjeta crédito</option>
+              <option value="otro">Otro</option>
+            </select>
+            <input type="number" min="0" step="1" class="form-control"
+                   id="campo-monto-pago-nuevo" placeholder="Monto de este pago" />
+            <button type="button" class="btn btn-secundario flex-shrink-0" id="boton-agregar-pago">
+              <i class="bi bi-plus-lg"></i>
+            </button>
+          </div>
+          <p class="texto-secundario mb-3" style="font-size:0.78rem;">
+            Para una factura partida (ej. mitad efectivo, mitad Nequi), agrega aquí cada
+            método con su monto correspondiente antes de confirmar el pago.
+          </p>
+
+          <!-- Lista de pagos ya agregados a este cobro -->
+          <div id="lista-pagos-agregados" class="mb-3"></div>
+
+          <!-- Resumen: cuanto se ha pagado en total y cuanto falta o sobra -->
+          <div class="d-flex justify-content-between mb-1">
+            <span class="texto-secundario">Total pagado</span>
+            <span class="fw-bold" id="texto-total-pagado-modal">$ 0</span>
+          </div>
+          <div class="d-flex justify-content-between fs-5">
+            <span class="texto-secundario" id="etiqueta-restante-o-cambio">Falta por pagar</span>
+            <span class="fw-bold" style="color:var(--color-dorado-oscuro);"
+                  id="texto-restante-o-cambio">$ 0</span>
+          </div>
+
+          <!-- Alerta de error dentro del modal de cobro -->
+          <div id="mensaje-error-modal-cobrar"
+               class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario"
+                  data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" class="btn btn-marca" id="boton-confirmar-pago" disabled>
+            Confirmar pago
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: facturacion de una venta ya cobrada (tirilla, PDF, WhatsApp, correo) ===== -->
+  <div class="modal fade" id="modalFactura" tabindex="-1"
+       aria-labelledby="titulo-modal-factura" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-factura">
+            Factura <span>generada</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3" id="texto-resumen-factura"></p>
+
+          <div class="d-grid gap-2">
+            <button type="button" class="btn btn-secundario text-start" id="boton-factura-imprimir">
+              <i class="bi bi-printer me-2"></i> Imprimir tirilla (80mm)
+            </button>
+            <button type="button" class="btn btn-secundario text-start" id="boton-factura-pdf">
+              <i class="bi bi-file-earmark-pdf me-2"></i> Descargar PDF
+            </button>
+            <button type="button" class="btn btn-secundario text-start" id="boton-factura-whatsapp">
+              <i class="bi bi-whatsapp me-2"></i> Enviar por WhatsApp
+            </button>
+            <button type="button" class="btn btn-secundario text-start" id="boton-factura-mostrar-correo">
+              <i class="bi bi-envelope me-2"></i> Enviar por correo
+            </button>
+          </div>
+
+          <!-- Bloque de correo, oculto hasta que se pulse "Enviar por correo" -->
+          <div id="bloque-factura-correo" class="mt-3 d-none">
+            <label class="form-label" for="campo-correo-factura">Correo del cliente</label>
+            <div class="input-group">
+              <input type="email" class="form-control" id="campo-correo-factura"
+                     placeholder="cliente@correo.com" />
+              <button type="button" class="btn btn-marca" id="boton-factura-enviar-correo">
+                Enviar
+              </button>
+            </div>
+          </div>
+
+          <!-- Alertas del modal de factura -->
+          <div id="mensaje-error-modal-factura" class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+          <div id="mensaje-exito-modal-factura" class="alert alert-success py-2 mt-3 d-none" role="alert"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Listo, cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: historial de ventas cobradas/anuladas (buscador + anular) =====
+       Permite encontrar una venta reciente ya cobrada y anularla si el
+       cliente cambio de opinion despues de que la factura se genero. Al
+       abrirse (show.bs.modal en pos.js) carga las ultimas ventas; el campo
+       de busqueda filtra en el servidor por numero de venta, mesa o vendedor. -->
+  <div class="modal fade" id="modalHistorialVentas" tabindex="-1"
+       aria-labelledby="titulo-modal-historial-ventas" aria-modal="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-historial-ventas">
+            Ventas <span>cobradas</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="texto-secundario mb-3" style="font-size:0.85rem;">
+            Busca una venta reciente por número, mesa o vendedor. Si el cliente
+            cambió de opinión después de que la factura ya se generó, puedes
+            anularla: el inventario se repone automáticamente y queda
+            registrado qué productos se anularon, cuándo, quién lo hizo y por
+            qué motivo (visible también en Logs y Reportes).
+          </p>
+
+          <!-- Buscador: dispara la busqueda en el servidor con un pequeño
+               retraso (debounce) para no saturar la API con cada tecla -->
+          <div class="input-group mb-3">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="campo-buscar-historial-ventas"
+                   placeholder="Buscar por número de venta, mesa o vendedor..." />
+          </div>
+
+          <!-- Alerta de error del historial de ventas -->
+          <div id="mensaje-error-historial-ventas"
+               class="alert alert-danger py-2 d-none" role="alert"></div>
+
+          <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Fecha</th>
+                  <th>Mesa / Venta</th>
+                  <th>Vendedor</th>
+                  <th>Método de pago</th>
+                  <th>Total</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <!-- Las filas se insertan dinamicamente desde pos.js -->
+              <tbody id="cuerpo-historial-ventas" aria-live="polite"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: ver el detalle completo de una venta anulada (productos,
+       cuando, quien y por que), accesible desde la fila del historial ===== -->
+  <div class="modal fade" id="modalDetalleAnulacion" tabindex="-1"
+       aria-labelledby="titulo-modal-detalle-anulacion" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-detalle-anulacion">
+            Detalle de la <span>anulación</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body" id="contenido-detalle-anulacion">
+          <!-- Se llena dinamicamente desde pos.js -->
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Modal: anular una venta ya cobrada (pide motivo obligatorio) ===== -->
+  <div class="modal fade" id="modalAnularVenta" tabindex="-1"
+       aria-labelledby="titulo-modal-anular-venta" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-content tarjeta-oscura">
+        <div class="modal-header border-0">
+          <h5 class="modal-title marca-sistema" id="titulo-modal-anular-venta">
+            Anular <span>venta</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Id de la venta que se va a anular, guardado para el POST al confirmar -->
+          <input type="hidden" id="anular-venta-id" />
+
+          <!-- Resumen de la venta que se va a anular, para confirmar visualmente -->
+          <p class="mb-2" id="texto-resumen-anular"></p>
+
+          <!-- Lista de productos que se anularán, para que el cajero confirme
+               visualmente qué está devolviendo al inventario antes de anular -->
+          <div class="mb-3">
+            <p class="texto-secundario mb-1" style="font-size:0.8rem;">
+              Productos que se repondrán al inventario:
+            </p>
+            <ul class="mb-0" id="lista-productos-anular" style="font-size:0.88rem;"></ul>
+          </div>
+
+          <div class="alert alert-warning py-2" style="font-size:0.85rem;">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            Esta acción repondrá automáticamente el inventario de los productos
+            de esta venta y no se puede deshacer.
+          </div>
+
+          <!-- Motivo obligatorio de la anulacion, para dejar trazabilidad -->
+          <label class="form-label" for="campo-motivo-anulacion">
+            Motivo de la anulación (obligatorio)
+          </label>
+          <textarea class="form-control" id="campo-motivo-anulacion" rows="3"
+                    maxlength="300" placeholder="Ej: El cliente canceló el pedido después de pagar..."
+                    required></textarea>
+
+          <!-- Alerta de error dentro del modal de anulacion -->
+          <div id="mensaje-error-modal-anular"
+               class="alert alert-danger py-2 mt-3 d-none" role="alert"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secundario" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" class="btn btn-outline-danger" id="boton-confirmar-anulacion">
+            <i class="bi bi-x-circle me-1"></i> Anular venta
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor de notificaciones tipo toast (esquina inferior derecha) -->
+  <div class="contenedor-notificaciones" id="contenedor-notificaciones"
+       aria-live="polite"></div>
+
+  <!-- Bootstrap JS: necesario para los modales y componentes interactivos -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Quagga2: libreria de deteccion de codigos de barras 1D por camara -->
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.4.2/dist/quagga.min.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- api.js: funciones centralizadas para llamadas al backend, sesion y utilidades -->
+  <script src="js/api.js"></script>
+  <!-- sidebar.js: controla mostrar/ocultar la barra lateral en celular -->
+  <script src="js/sidebar.js"></script>
+  <!-- ui-notificaciones.js y ui-confirmacion.js: toasts y modal de confirmacion,
+       usados por pos.js. Deben cargarse ANTES de pos.js para que sus
+       funciones globales (mostrarNotificacion, confirmarAccion) ya existan. -->
+  <script src="js/ui-notificaciones.js"></script>
+  <script src="js/ui-confirmacion.js"></script>
+  <!-- ui-estados.js: skeleton loaders y estados vacios (usado por la grilla
+       de productos). Debe cargarse ANTES de pos.js. -->
+  <script src="js/ui-estados.js"></script>
+  <script src="js/suscripcion.js"></script>
+
+  <!-- escaner.js: modulo del escanador (debe ir antes de pos.js) -->
+  <script src="js/escaner.js"></script>
+  <!-- mesas-realtime.js: cliente WebSocket del bloqueo colaborativo de mesas
+       en tiempo real. Debe cargarse ANTES de pos.js para que el objeto
+       global GestorMesasRealtime ya exista cuando pos.js lo use. -->
+  <script src="js/mesas-realtime.js"></script>
+  <!-- pos.js: logica del modulo de punto de venta -->
+  <script src="js/pos.js"></script>
+  <script src="js/footer.js"></script>
+</body>
+</html>
