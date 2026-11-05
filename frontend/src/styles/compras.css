@@ -1,0 +1,114 @@
+/* frontend/src/styles/compras.css */
+/* Compras, proveedores y promociones: pestañas, buscador de productos con lista
+   de resultados, líneas de compra, total, avisos y tarjetas de promoción.
+   Se apoya en catalogo.css (tablas, formularios y barra de filtros). */
+
+/* --- Pestañas --- */
+.pestanas { display: flex; gap: 6px; border-bottom: 1px solid var(--gris-suave); overflow-x: auto; }
+.pestana {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 18px; cursor: pointer;
+  border: 0; border-bottom: 3px solid transparent; background: none; color: var(--texto-suave);
+  font: 600 0.95rem var(--fuente-cuerpo); white-space: nowrap; transition: color 0.18s ease, border-color 0.18s ease;
+}
+.pestana:hover { color: var(--texto); }
+.pestana.activa { color: var(--dorado-oscuro); border-bottom-color: var(--dorado); }
+
+/* --- Filtros de fecha --- */
+.filtro-fecha { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.enlace-telefono { display: inline-flex; align-items: center; gap: 6px; color: var(--texto); text-decoration: none; }
+.enlace-telefono:hover { color: var(--dorado-oscuro); }
+.enlace-boton { border: 0; background: none; padding: 0; cursor: pointer; color: var(--dorado-oscuro); font: 600 inherit var(--fuente-cuerpo); text-decoration: underline; }
+
+/* --- Buscador de productos --- */
+.etiqueta-campo { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 6px; }
+.buscador-producto { position: relative; }
+.buscador-resultados {
+  position: absolute; z-index: 10; left: 0; right: 0; top: 100%; margin: 4px 0 0; padding: 6px; list-style: none;
+  max-height: 290px; overflow-y: auto; background: var(--blanco);
+  border: 1px solid var(--gris-suave); border-radius: 12px; box-shadow: var(--sombra);
+}
+.buscador-resultados button {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; color: var(--texto);
+  font: 400 0.9rem var(--fuente-cuerpo);
+}
+.buscador-resultados button:hover, .buscador-resultados button:focus-visible { background: rgba(201, 162, 39, 0.12); }
+.buscador-resultados .sin-resultados { padding: 10px 12px; font-size: 0.88rem; }
+
+/* --- Líneas de compra y de combo --- */
+.compra-lineas { list-style: none; margin: 10px 0 0; padding: 0; }
+.compra-linea, .promo-item {
+  display: grid; grid-template-columns: 1fr 100px 150px 120px auto; gap: 10px; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid var(--gris-suave);
+}
+.promo-item { grid-template-columns: 1fr 110px auto; }
+.compra-linea-nombre { display: grid; gap: 3px; min-width: 0; font-size: 0.9rem; }
+.compra-linea-nombre .etiqueta { justify-self: start; display: inline-flex; align-items: center; gap: 4px; }
+.compra-campo { display: grid; gap: 3px; font-size: 0.74rem; color: var(--texto-suave); }
+.compra-campo input {
+  min-height: 42px; padding: 0 10px; border: 1px solid var(--gris-suave); border-radius: 10px;
+  color: var(--texto); font: 500 0.95rem var(--fuente-cuerpo);
+}
+.compra-campo input:focus { outline: 2px solid var(--dorado); outline-offset: 1px; }
+.compra-subtotal { text-align: right; font-size: 0.95rem; }
+.compra-total {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 14px;
+  padding: 14px 16px; border-radius: 12px; background: rgba(201, 162, 39, 0.12);
+}
+.compra-total strong { font-family: var(--fuente-titulos); font-size: 1.6rem; color: var(--dorado-oscuro); }
+.oculto-visual { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* --- Detalle de compra --- */
+.detalle-datos { display: flex; gap: 24px; flex-wrap: wrap; margin: 0 0 14px; }
+.detalle-datos dt { color: var(--texto-suave); font-size: 0.8rem; }
+.detalle-datos dd { margin: 2px 0 0; font-weight: 600; }
+.detalle-tabla { border: 1px solid var(--gris-suave); border-radius: 12px; }
+
+/* --- Avisos dentro de formularios --- */
+.aviso-form {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; padding: 10px 14px; border-radius: 12px;
+  background: rgba(201, 162, 39, 0.16); color: var(--dorado-oscuro); font-size: 0.88rem; font-weight: 500;
+}
+.aviso-form.critico { background: rgba(192, 57, 43, 0.12); color: var(--rojo); }
+
+/* --- Promociones --- */
+.promos-rejilla { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+.promo-tarjeta { display: flex; flex-direction: column; gap: 12px; padding: 18px; animation: aparece 0.25s ease both; }
+.promo-tarjeta.inactiva { opacity: 0.65; }
+.promo-cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.promo-cabecera h3 { margin: 0; font-size: 1.1rem; }
+.promo-descripcion { margin: 0; }
+.promo-componentes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 0.9rem; }
+.promo-componentes li { display: flex; align-items: center; gap: 10px; }
+.miniatura-chica { width: 32px; height: 32px; border-radius: 8px; }
+.promo-precio { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.promo-precio strong { font-family: var(--fuente-titulos); font-size: 1.6rem; color: var(--dorado-oscuro); }
+.promo-tachado { text-decoration: line-through; }
+.promo-finanzas {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 10px 12px;
+  border-radius: 12px; background: rgba(47, 143, 91, 0.1);
+}
+.promo-finanzas.perdida { background: rgba(192, 57, 43, 0.1); }
+.promo-finanzas dt { font-size: 0.72rem; color: var(--texto-suave); }
+.promo-finanzas dd { margin: 2px 0 0; font-weight: 700; font-size: 0.9rem; }
+.promo-vigencia { margin: 0; font-size: 0.8rem; }
+.promo-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+
+/* --- Vista previa del combo --- */
+.vista-previa-promo { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--fondo); }
+.vista-previa-promo dt { font-size: 0.76rem; color: var(--texto-suave); }
+.vista-previa-promo dd { margin: 2px 0 0; font-weight: 700; }
+.texto-rojo { color: var(--rojo); }
+.texto-verde { color: var(--verde); }
+
+/* --- Móvil: las líneas se apilan para que los campos sean cómodos al tacto --- */
+@media (max-width: 767.98px) {
+  .compra-linea { grid-template-columns: 1fr 1fr; }
+  .compra-linea .compra-linea-nombre { grid-column: 1 / -1; }
+  .compra-linea .compra-subtotal { text-align: left; }
+  .compra-linea .boton-icono { justify-self: end; }
+  .promo-item { grid-template-columns: 1fr auto; }
+  .promo-item .compra-linea-nombre { grid-column: 1 / -1; }
+  .filtro-fecha { flex: 1; min-width: 140px; }
+  .filtro-fecha .filtro-select { flex: 1; min-width: 0; }
+}

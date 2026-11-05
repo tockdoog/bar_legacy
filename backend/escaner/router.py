@@ -10,11 +10,16 @@
 #   - Los logs de auditoría usan hash SHA-256 del codigo, nunca el valor en claro.
 #   - Rate limiting por IP heredado del limitador global de la aplicacion.
 #   - SQLAlchemy usa parametros enlazados: el codigo nunca se interpola en SQL.
+#
+# CAMBIOS EN ESTA VERSION:
+#   - El costo de compra (precio_compra) solo se devuelve a quien puede ver costos
+#     (administrador o permiso "inventario_gestionar"); para el resto sale en None.
+#   - La fecha del evento se guarda con ahora_colombia() (hora local de Colombia),
+#     coherente con ventas y compras.
 
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -24,6 +29,7 @@ from app.dependencies import requerir_rol
 from app.models.producto import Producto
 from app.models.usuario import RolUsuario
 from app.utils.limitador import limitador
+from app.utils.zona_horaria import ahora_colombia
 from escaner.models import EscaneoLog
 from escaner.schemas import ResultadoEscaneo, RegistroEscaneoBitacora
 
@@ -33,7 +39,6 @@ logger = logging.getLogger("escaner")
 router = APIRouter(prefix="/api/escaner", tags=["Escaner"])
 
 # Patron de validacion de codigo de barras: letras, numeros y guiones, max 64 chars.
-# Rechaza caracteres especiales que podrian usarse en inyecciones u otros ataques.
 PATRON_CODIGO_VALIDO = re.compile(r"^[A-Za-z0-9\-]{1,64}$")
 
 
@@ -55,11 +60,15 @@ def _validar_codigo(codigo: str) -> None:
 
 def _hash_codigo(codigo: str) -> str:
     """
-    Genera un hash SHA-256 truncado del codigo de barras para los logs de auditoria.
-    Se usan los primeros 16 caracteres hex (64 bits) para detectar patrones repetidos
-    sin exponer el valor real del codigo en los registros del servidor.
+    Genera un hash SHA-256 truncado del codigo de barras para los logs de auditoria
+    (primeros 16 caracteres hex), sin exponer el valor real del codigo.
     """
     return hashlib.sha256(codigo.encode("utf-8")).hexdigest()[:16]
+
+
+def _puede_ver_costos(usuario) -> bool:
+    """El administrador y quien gestiona el inventario pueden ver el costo de compra."""
+    return usuario.rol == RolUsuario.ADMINISTRADOR or "inventario_gestionar" in usuario.permisos_lista
 
 
 # ---------------------------------------------------------------------------
@@ -104,21 +113,18 @@ def buscar_por_codigo_de_barras(
     )
 
     if not producto:
-        # Codigo no encontrado: log de advertencia y respuesta 200 con encontrado=False
-        logger.warning(
-            "Codigo no encontrado | codigo_hash=%s",
-            _hash_codigo(codigo_barras),
-        )
+        logger.warning("Codigo no encontrado | codigo_hash=%s", _hash_codigo(codigo_barras))
         return ResultadoEscaneo(encontrado=False)
 
-    # Construccion manual de la respuesta para no exponer campos internos del ORM
+    # Construccion manual de la respuesta para no exponer campos internos del ORM.
+    # El costo de compra solo se incluye si el usuario puede verlo.
     return ResultadoEscaneo(
         encontrado=True,
         id=producto.id,
         nombre=producto.nombre,
         codigo_barras=producto.codigo_barras,
         precio_venta=producto.precio_venta,
-        precio_compra=producto.precio_compra,
+        precio_compra=producto.precio_compra if _puede_ver_costos(usuario) else None,
         stock_actual=producto.stock_actual,
         stock_minimo=producto.stock_minimo,
         presentacion=producto.presentacion,
@@ -146,7 +152,6 @@ def registrar_evento_escaneo(
 ) -> None:
     """
     Persiste en la base de datos un evento de escaneo enviado por el frontend.
-    Permite generar reportes de actividad del escanador sin depender de logs externos.
     Guarda el codigo real solo cuando el producto fue encontrado (dato ya conocido).
     Cuando no se encontro el producto guarda NULL para no revelar intentos fallidos.
     """
@@ -154,7 +159,6 @@ def registrar_evento_escaneo(
     origenes_validos = {"inventario", "pos", "compras"}
     modulo_seguro = datos.origen if datos.origen in origenes_validos else "desconocido"
 
-    # Busca el producto asociado al codigo si fue encontrado, para guardar la FK
     producto_id = None
     codigo_a_guardar = None
 
@@ -170,10 +174,9 @@ def registrar_evento_escaneo(
         )
         if producto:
             producto_id = producto.id
-            # Guarda el codigo real solo cuando el producto existe (dato ya publico)
             codigo_a_guardar = datos.codigo_escaneado
 
-    # Crea el registro de auditoria en la base de datos
+    # Registro de auditoria con la fecha en hora local de Colombia
     evento = EscaneoLog(
         codigo_hash=_hash_codigo(datos.codigo_escaneado),
         codigo_barras=codigo_a_guardar,
@@ -181,12 +184,11 @@ def registrar_evento_escaneo(
         encontrado=datos.encontrado,
         usuario_id=usuario.id,
         producto_id=producto_id,
-        fecha=datetime.now(timezone.utc),
+        fecha=ahora_colombia(),
     )
     db.add(evento)
     db.commit()
 
-    # Log del servidor con hash para correlacion de eventos si fuera necesario
     logger.info(
         "Bitacora escaneo | usuario=%s | hash=%s | modulo=%s | encontrado=%s",
         usuario.nombre_usuario,

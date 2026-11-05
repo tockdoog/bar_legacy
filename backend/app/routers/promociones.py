@@ -4,17 +4,23 @@
 #
 # SEGURIDAD (datos financieros sensibles): el costo de un producto
 # (precio_compra) nunca debe llegar a un usuario con rol EMPLEADO, porque
-# revela el margen de utilidad del negocio. Por eso _construir_respuesta()
-# recibe el usuario que hace la petición y solo calcula/adjunta
-# "costo_total", "ganancia_negocio" y "margen_ganancia_porcentaje" cuando
-# ese usuario es ADMINISTRADOR. Para EMPLEADO, esos tres campos quedan en
-# None y el frontend los oculta.
+# revela el margen de utilidad del negocio. _construir_respuesta() solo
+# calcula "costo_total", "ganancia_negocio" y "margen_ganancia_porcentaje"
+# cuando quien consulta es ADMINISTRADOR; para los demás quedan en None.
+#
+# CAMBIOS EN ESTA VERSIÓN:
+# - GET admite ?incluir_inactivas=true (solo lo respeta para el administrador),
+#   necesario para poder volver a activar una promoción desactivada.
+# - Se rechazan productos repetidos dentro de una misma promoción y los
+#   valores nulos en campos obligatorios al editar (antes daban error 500).
+# - Crear, editar y activar/desactivar quedan registrados en negocio.log.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import obtener_db
 from app.dependencies import requerir_rol
+from app.logs.logger import registrar_negocio
 from app.models.producto import Producto
 from app.models.promocion import Promocion, ComponentePromocion
 from app.models.usuario import RolUsuario, Usuario
@@ -23,6 +29,7 @@ from app.schemas.promocion import (
     PromocionActualizar,
     PromocionRespuesta,
     ComponentePromocionRespuesta,
+    ComponentePromocionCrear,
 )
 
 router = APIRouter(prefix="/api/promociones", tags=["Promociones"])
@@ -31,12 +38,8 @@ router = APIRouter(prefix="/api/promociones", tags=["Promociones"])
 def _construir_respuesta(promocion: Promocion, usuario: Usuario) -> PromocionRespuesta:
     """
     Convierte una promoción y sus componentes en el esquema de respuesta.
-
-    Calcula siempre el ahorro del cliente (dato público para cualquier rol
-    autenticado). Calcula el costo y la ganancia del negocio SOLO si quien
-    consulta es ADMINISTRADOR; para cualquier otro rol esos campos se
-    devuelven en None, sin excepción, sin importar qué endpoint llame a
-    esta función.
+    El ahorro del cliente es público para cualquier rol; el costo y la ganancia
+    del negocio solo se calculan para el ADMINISTRADOR.
     """
     incluir_datos_sensibles = usuario.rol == RolUsuario.ADMINISTRADOR
 
@@ -85,31 +88,56 @@ def _construir_respuesta(promocion: Promocion, usuario: Usuario) -> PromocionRes
     )
 
 
+def _validar_componentes(db: Session, items: list[ComponentePromocionCrear]) -> None:
+    """
+    Verifica que ningún producto se repita dentro de la promoción y que todos
+    existan y estén activos. Se valida ANTES de modificar nada en la base de datos.
+    """
+    ids = [item.producto_id for item in items]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Un mismo producto aparece más de una vez en la promoción. Suma sus cantidades en una sola línea.",
+        )
+    for producto_id in ids:
+        existe = db.query(Producto.id).filter(Producto.id == producto_id, Producto.activo.is_(True)).first()
+        if not existe:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Producto con id {producto_id} no encontrado o inactivo",
+            )
+
+
 @router.get("/", response_model=list[PromocionRespuesta])
 def listar_promociones(
+    incluir_inactivas: bool = Query(default=False),
     db: Session = Depends(obtener_db),
-    usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR, RolUsuario.EMPLEADO)),
+    usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR, RolUsuario.EMPLEADO)),
 ):
-    """Lista todas las promociones activas (visibles para usar en el punto de venta)."""
-    promociones = (
-        db.query(Promocion)
-        .options(joinedload(Promocion.componentes).joinedload(ComponentePromocion.producto))
-        .filter(Promocion.activa.is_(True))
-        .all()
+    """
+    Lista las promociones activas (las usadas en el punto de venta). Si el
+    usuario es administrador y envía incluir_inactivas=true, también devuelve
+    las desactivadas para poder gestionarlas.
+    """
+    consulta = db.query(Promocion).options(
+        joinedload(Promocion.componentes).joinedload(ComponentePromocion.producto)
     )
+    if not (incluir_inactivas and usuario.rol == RolUsuario.ADMINISTRADOR):
+        consulta = consulta.filter(Promocion.activa.is_(True))
+
+    promociones = consulta.order_by(Promocion.nombre).all()
     return [_construir_respuesta(p, usuario) for p in promociones]
 
 
 @router.post("/", response_model=PromocionRespuesta, status_code=status.HTTP_201_CREATED)
 def crear_promocion(
+    request: Request,
     datos: PromocionCrear,
     db: Session = Depends(obtener_db),
-    usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
+    usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
     """Crea una nueva promoción con sus productos componentes."""
-    for item in datos.items:
-        if not db.query(Producto).filter(Producto.id == item.producto_id).first():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Producto con id {item.producto_id} no encontrado")
+    _validar_componentes(db, datos.items)
 
     nueva_promocion = Promocion(
         nombre=datos.nombre,
@@ -125,24 +153,44 @@ def crear_promocion(
 
     db.commit()
     db.refresh(nueva_promocion)
+
+    registrar_negocio(
+        accion=f"Creó la promoción #{nueva_promocion.id} '{nueva_promocion.nombre}'",
+        usuario=usuario.nombre_usuario,
+        detalle=f"Precio promocional: ${nueva_promocion.precio_promocional:,.0f}",
+        request=request,
+    )
     return _construir_respuesta(nueva_promocion, usuario)
 
 
 @router.put("/{promocion_id}", response_model=PromocionRespuesta)
 def actualizar_promocion(
+    request: Request,
     promocion_id: int,
     datos: PromocionActualizar,
     db: Session = Depends(obtener_db),
-    usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
+    usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
-    """Actualiza los datos de una promoción. Si se envían 'items', reemplaza todos sus componentes."""
+    """Actualiza una promoción. Si se envían 'items', reemplaza todos sus componentes."""
     promocion = db.query(Promocion).filter(Promocion.id == promocion_id).first()
     if not promocion:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Promoción no encontrada")
 
     datos_dict = datos.model_dump(exclude_unset=True)
-    items = datos_dict.pop("items", None)
+    datos_dict.pop("items", None)
+    items = datos.items  # None si no se envió: los componentes no cambian
 
+    # Los campos obligatorios no pueden quedar en nulo (la base de datos no lo admite)
+    for campo in ("nombre", "precio_promocional", "activa"):
+        if campo in datos_dict and datos_dict[campo] is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"El campo '{campo}' no puede quedar vacío")
+
+    if items is not None:
+        if not items:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La promoción debe tener al menos un producto")
+        _validar_componentes(db, items)
+
+    estado_anterior = promocion.activa
     for campo, valor in datos_dict.items():
         setattr(promocion, campo, valor)
 
@@ -152,20 +200,30 @@ def actualizar_promocion(
             db.delete(componente)
         db.flush()
         for item in items:
-            if not db.query(Producto).filter(Producto.id == item["producto_id"]).first():
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Producto con id {item['producto_id']} no encontrado")
-            db.add(ComponentePromocion(promocion_id=promocion.id, producto_id=item["producto_id"], cantidad=item["cantidad"]))
+            db.add(ComponentePromocion(promocion_id=promocion.id, producto_id=item.producto_id, cantidad=item.cantidad))
 
     db.commit()
     db.refresh(promocion)
+
+    if promocion.activa != estado_anterior:
+        accion = "Activó" if promocion.activa else "Desactivó"
+    else:
+        accion = "Modificó"
+    registrar_negocio(
+        accion=f"{accion} la promoción #{promocion.id} '{promocion.nombre}'",
+        usuario=usuario.nombre_usuario,
+        detalle=f"Precio promocional: ${promocion.precio_promocional:,.0f}",
+        request=request,
+    )
     return _construir_respuesta(promocion, usuario)
 
 
 @router.delete("/{promocion_id}", status_code=status.HTTP_204_NO_CONTENT)
 def desactivar_promocion(
+    request: Request,
     promocion_id: int,
     db: Session = Depends(obtener_db),
-    usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
+    usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
     """Desactiva una promoción (eliminación lógica, conserva el historial de ventas que ya la usaron)."""
     promocion = db.query(Promocion).filter(Promocion.id == promocion_id).first()
@@ -174,3 +232,9 @@ def desactivar_promocion(
 
     promocion.activa = False
     db.commit()
+
+    registrar_negocio(
+        accion=f"Desactivó la promoción #{promocion.id} '{promocion.nombre}'",
+        usuario=usuario.nombre_usuario,
+        request=request,
+    )

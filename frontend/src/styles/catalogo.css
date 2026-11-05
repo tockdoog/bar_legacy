@@ -1,0 +1,116 @@
+/* frontend/src/styles/catalogo.css */
+/* Pantallas de catálogo (Productos, Inventario, Categorías): barra de filtros,
+   tabla responsive (en móvil cada fila se vuelve una tarjeta), paginación,
+   formularios, selector de imagen, barras de existencias y tarjetas de categoría. */
+
+.catalogo { display: grid; gap: 16px; }
+.catalogo-barra { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.catalogo-barra .campo-caja { flex: 1; min-width: 200px; }
+.titulo-seccion { margin: 0; flex: 1; font-size: 1.3rem; }
+.catalogo h3 { margin: 0 0 6px; font-size: 1.05rem; }
+
+.filtro-select {
+  min-height: 48px; padding: 0 12px; border: 1px solid var(--gris-suave); border-radius: 12px;
+  background: var(--blanco); color: var(--texto); font: 400 0.92rem var(--fuente-cuerpo);
+}
+
+/* --- Tabla --- */
+.tabla-contenedor { padding: 0; overflow: hidden; }
+.tabla-datos { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tabla-datos th {
+  text-align: left; padding: 12px 14px; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--texto-suave); background: var(--fondo); border-bottom: 1px solid var(--gris-suave);
+}
+.tabla-datos td { padding: 12px 14px; border-bottom: 1px solid var(--gris-suave); vertical-align: middle; }
+.tabla-datos tbody tr:hover { background: rgba(201, 162, 39, 0.05); }
+.tabla-datos .num { text-align: right; font-variant-numeric: tabular-nums; }
+.solo-lectura { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.celda-producto { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.miniatura {
+  flex-shrink: 0; width: 44px; height: 44px; border-radius: 10px; overflow: hidden;
+  display: grid; place-items: center; background: var(--fondo); color: var(--dorado-oscuro);
+}
+.miniatura img { width: 100%; height: 100%; object-fit: cover; }
+.codigo { display: inline-flex; align-items: center; gap: 4px; font-family: 'Courier New', monospace; font-size: 0.84rem; }
+.existencias { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.celda-acciones { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.boton-icono-borde {
+  width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--gris-suave); border-radius: 10px; background: var(--blanco); color: var(--texto);
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.boton-icono-borde:hover { border-color: var(--dorado); color: var(--dorado-oscuro); }
+.boton-icono-borde.peligro:hover { border-color: var(--rojo); color: var(--rojo); }
+
+/* --- Existencias con barra --- */
+.stock-celda { display: grid; gap: 4px; min-width: 90px; }
+.stock-barra { display: block; height: 6px; border-radius: 999px; background: var(--gris-suave); overflow: hidden; }
+.stock-barra span { display: block; height: 100%; border-radius: 999px; }
+.stock-barra .ok { background: var(--verde); }
+.stock-barra .bajo { background: var(--dorado); }
+.stock-barra .agotado { background: var(--rojo); }
+
+/* --- Paginación --- */
+.paginacion { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; font-size: 0.88rem; }
+.paginacion-controles { display: flex; align-items: center; gap: 10px; }
+
+/* --- Formularios --- */
+.formulario-rejilla { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.formulario-rejilla .ocupa-todo { grid-column: 1 / -1; }
+.campo-caja select, .campo-caja textarea {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--texto);
+  font: 400 1rem var(--fuente-cuerpo);
+}
+.campo-caja select { min-height: 46px; }
+.campo-caja textarea { padding: 10px 0; resize: vertical; }
+.campo-caja.con-error { border-color: var(--rojo); }
+.campo-error { display: block; margin-top: 4px; color: var(--rojo); font-size: 0.8rem; }
+.campo-ayuda { display: block; margin-top: 4px; color: var(--texto-suave); font-size: 0.78rem; }
+.seccion-form { margin: 6px 0 4px; padding-top: 14px; border-top: 1px solid var(--gris-suave); }
+.casilla {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 14px; cursor: pointer;
+  border: 1px solid var(--gris-suave); border-radius: 12px; font-size: 0.92rem;
+}
+.casilla input { width: 20px; height: 20px; accent-color: var(--dorado); }
+
+/* --- Selector de imagen --- */
+.imagen-campo { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
+.imagen-vista {
+  flex-shrink: 0; width: 88px; height: 88px; border-radius: 14px; overflow: hidden;
+  display: grid; place-items: center; background: var(--fondo); color: var(--dorado-oscuro);
+}
+.imagen-vista img { width: 100%; height: 100%; object-fit: cover; }
+.imagen-acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.imagen-acciones .campo-ayuda { flex-basis: 100%; margin: 0; }
+
+/* --- Ajuste de existencias --- */
+.ajuste-controles { display: flex; gap: 6px; align-items: center; margin: 12px 0; }
+.ajuste-controles input {
+  flex: 1; min-width: 0; min-height: 46px; text-align: center; font: 600 1.2rem var(--fuente-cuerpo);
+  border: 1px solid var(--gris-suave); border-radius: 12px; color: var(--texto);
+}
+
+/* --- Categorías --- */
+.categorias-rejilla { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.categoria-tarjeta { display: flex; flex-direction: column; justify-content: space-between; gap: 14px; padding: 18px; }
+.categoria-tarjeta p { margin: 4px 0 0; }
+.categoria-pie { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.presentaciones-lista { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* --- Móvil: cada fila de la tabla se muestra como una tarjeta --- */
+@media (max-width: 767.98px) {
+  .formulario-rejilla { grid-template-columns: 1fr; }
+  .tabla-contenedor { background: transparent; border: 0; box-shadow: none; }
+  .tabla-datos, .tabla-datos tbody { display: block; }
+  .tabla-datos thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .tabla-datos tr {
+    display: block; margin-bottom: 12px; padding: 6px 14px; background: var(--blanco);
+    border: 1px solid var(--gris-suave); border-radius: var(--radio); box-shadow: var(--sombra);
+  }
+  .tabla-datos td { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--gris-suave); text-align: right; }
+  .tabla-datos td:last-child { border-bottom: 0; }
+  .tabla-datos td[data-label]::before { content: attr(data-label); color: var(--texto-suave); font-size: 0.8rem; text-align: left; }
+  .tabla-datos td.num { text-align: right; }
+  .celda-acciones { justify-content: flex-end; }
+  .imagen-campo { flex-direction: column; align-items: flex-start; }
+}

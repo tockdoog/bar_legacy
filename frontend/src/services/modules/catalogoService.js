@@ -1,6 +1,8 @@
 // frontend/src/services/modules/catalogoService.js
-// Servicios de lectura del catálogo que usa el POS: productos, categorías y
-// promociones activas, más el registro de escaneos en la bitácora del backend.
+// Servicios de lectura del catálogo que usan el POS y Compras: productos,
+// categorías y promociones activas, más el registro de escaneos en la bitácora.
+// CAMBIO: registrarEscaneo recibe el módulo de origen ("pos" por defecto, o
+// "compras"/"inventario"); el backend solo acepta esos tres valores.
 
 import api from '../api.js';
 
@@ -22,15 +24,15 @@ export async function listarPromociones() {
   return data;
 }
 
-// Bloque: bitácora de escaneos. Es informativa: si falla, no debe estorbar la venta.
-export async function registrarEscaneo(codigo, encontrado) {
+// Bloque: bitácora de escaneos. Es informativa: si falla, no debe estorbar al usuario.
+export async function registrarEscaneo(codigo, encontrado, origen = 'pos') {
   try {
     await api.post('/api/escaner/bitacora', {
       codigo_escaneado: codigo,
-      origen: 'pos',
+      origen,
       encontrado,
     });
   } catch {
-    // Sin acciones: la bitácora nunca interrumpe el flujo del cajero
+    // Sin acciones: la bitácora nunca interrumpe el flujo del usuario
   }
 }

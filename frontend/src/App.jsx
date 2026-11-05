@@ -16,6 +16,11 @@ import Login from './pages/auth/Login.jsx';
 import Inicio from './pages/dashboard/Inicio.jsx';
 import PuntoVenta from './pages/pos/PuntoVenta.jsx';
 import Mesas from './pages/mesas/Mesas.jsx';
+import Productos from './pages/productos/Productos.jsx';
+import Inventario from './pages/inventario/Inventario.jsx';
+import Categorias from './pages/categorias/Categorias.jsx';
+import Compras from './pages/compras/Compras.jsx';
+import Promociones from './pages/promociones/Promociones.jsx';
 import Diagnostico from './pages/test/Diagnostico.jsx';
 import { EVENTO_SISTEMA_BLOQUEADO } from './services/api.js';
 import { useAuth } from './context/AuthContext.jsx';
@@ -24,6 +29,11 @@ import { useAuth } from './context/AuthContext.jsx';
 const PAGINAS = {
   '/pos': PuntoVenta,
   '/mesas': Mesas,
+  '/productos': Productos,
+  '/inventario': Inventario,
+  '/categorias': Categorias,
+  '/compras': Compras,
+  '/promociones': Promociones,
 };
 
 // Bloque: ruta pública que redirige al inicio si ya hay sesión activa

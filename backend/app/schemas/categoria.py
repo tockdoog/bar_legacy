@@ -14,6 +14,12 @@ class CategoriaCrear(CategoriaBase):
     pass
 
 
+class CategoriaActualizar(BaseModel):
+    """Datos opcionales para editar una categoría existente."""
+    nombre: str | None = Field(default=None, min_length=2, max_length=80)
+    descripcion: str | None = Field(default=None, max_length=255)
+
+
 class CategoriaRespuesta(CategoriaBase):
     """Datos de categoría que se devuelven al frontend."""
     id: int
