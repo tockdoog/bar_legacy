@@ -1,14 +1,17 @@
 # Ruta: backend/.vercelignore
-# Archivos que no deben subirse a Vercel cuando se despliega desde la línea de comandos
-# (secretos, bases locales y archivos de desarrollo). NO excluir "imagenes": contiene
-# el logo y los QR de pago que usa la API.
-.env
-.env.*
+# Archivos que no deben subirse a Vercel cuando se despliega (secretos, bases locales y
+# archivos de desarrollo). NO excluir "imagenes": contiene el logo y los QR de pago.
+#
+# IMPORTANTE: los patrones llevan "/" inicial para aplicarse solo a la raíz del backend.
+# Sin ella, "logs" también borraría el paquete de código backend/app/logs/ y la API
+# fallaría al arrancar con un error 500.
+/.env
+/.env.*
 *.db
-uploads
-scripts
-logs
-.venv
-venv
+/uploads
+/scripts
+/logs
+/.venv
+/venv
 __pycache__
 *.pyc
