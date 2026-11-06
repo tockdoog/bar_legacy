@@ -1,26 +1,24 @@
 # Ruta: backend/app/main.py
-# Punto de entrada de la API. Funciona en local (uvicorn) y en Vercel
-# (serverless, ver backend/api/index.py).
+# Punto de entrada de la API. Funciona en local (uvicorn) y en Vercel (serverless,
+# ver backend/api/index.py).
 #
-# DIFERENCIAS EN VERCEL:
-# - Los WebSockets no están soportados: el módulo de mesas en tiempo real se
-#   desactiva y el frontend sincroniza las mesas por consulta periódica.
-# - El disco es de solo lectura: la creación de carpetas se intenta sin fallar.
-# - El evento "lifespan" no es fiable: la inicialización (tablas, admin,
-#   suscripción) se ejecuta una vez por instancia, la primera vez que se necesita.
-# - CORS se registra al final para ser el middleware más externo, de modo que
-#   también agregue sus cabeceras a las respuestas 423 y 500.
+# DIFERENCIAS EN VERCEL: el disco es de solo lectura (las imágenes van a la base
+# de datos), no hay WebSockets (el bloqueo de mesas es REST, ver routers/mesas.py)
+# y el evento "lifespan" no es fiable, por eso la inicialización también se
+# dispara en la primera petición de cada instancia.
+#
+# ORDEN DE MIDDLEWARES (el último declarado es el más externo):
+#   CORS -> inicialización -> cabeceras de seguridad -> monitoreo -> bloqueo.
+# CORS va afuera para que hasta los 423/500/503 lleven sus cabeceras; el
+# monitoreo va afuera del bloqueo para registrar los 423 en seguridad.log.
 
-import asyncio
 import logging
 import os
 import threading
 import time
 from contextlib import asynccontextmanager
 
-# Bloque: fija la zona horaria de Colombia para todo el proceso. Hace que
-# date.today() y datetime.now() devuelvan hora de Bogotá aunque el servidor
-# (Vercel, Docker) esté en UTC.
+# Bloque: zona horaria de Colombia para todo el proceso (date.today(), datetime.now())
 os.environ["TZ"] = "America/Bogota"
 try:
     time.tzset()
@@ -37,10 +35,11 @@ from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 
 from app.config import configuracion
-from app.database import Base, motor, SesionLocal, ES_SQLITE, ES_VERCEL
+from app.database import Base, motor, SesionLocal, ES_SQLITE
 from app.utils.limitador import limitador
 from app.utils.inicializar_admin import crear_administrador_inicial
 from app.utils.migraciones import aplicar_migraciones_pendientes
+from app.utils.rutas import ruta_absoluta
 from app.suscripcion.service import obtener_suscripcion, esta_bloqueado
 
 from app.logs.logger import (
@@ -53,6 +52,7 @@ from app.logs.logger import (
 from app.logs.router import router as router_logs
 
 from app.routers import (
+    archivos,
     auth,
     categorias,
     productos,
@@ -69,11 +69,6 @@ from app.routers import finanzas
 from escaner.router import router as router_escaner
 from QR.router import router as router_qr
 from app.suscripcion.router import router as router_suscripcion
-
-# Solo se importa el módulo de WebSockets fuera de Vercel
-if not ES_VERCEL:
-    from app.mesas_realtime.router import router as router_mesas_tiempo_real
-    from app.mesas_realtime.gestor_bloqueos import tarea_periodica_expiracion_bloqueos
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -99,20 +94,11 @@ _estado_inicio = {"listo": False}
 _candado_inicio = threading.Lock()
 
 
-def _crear_carpeta_si_es_posible(ruta: str) -> None:
-    """Crea una carpeta; si el disco es de solo lectura (Vercel), lo ignora."""
-    try:
-        os.makedirs(ruta, exist_ok=True)
-    except OSError:
-        pass
-
-
 def inicializar_sistema() -> None:
     """
-    Prepara la base de datos y los datos iniciales. Es seguro llamarla varias
-    veces: solo trabaja la primera vez en cada instancia. En PostgreSQL usa un
-    candado transaccional para que dos instancias arrancando a la vez no
-    choquen al crear las tablas.
+    Prepara la base de datos y los datos iniciales. Es seguro llamarla varias veces:
+    solo trabaja la primera vez en cada instancia. En PostgreSQL usa un candado
+    transaccional para que dos instancias arrancando a la vez no choquen al crear tablas.
     """
     if _estado_inicio["listo"]:
         return
@@ -124,7 +110,7 @@ def inicializar_sistema() -> None:
         try:
             configurar_logging()
         except Exception as error:  # Un fallo de logs no debe impedir el arranque
-            logger.warning(f"No se pudo configurar el logging en archivos: {error}")
+            logger.warning(f"No se pudo configurar el logging: {error}")
 
         # Bloque: crea las tablas que aún no existan
         if ES_SQLITE:
@@ -136,9 +122,6 @@ def inicializar_sistema() -> None:
 
         # Bloque: agrega columnas faltantes en bases creadas con versiones anteriores
         aplicar_migraciones_pendientes(motor)
-
-        _crear_carpeta_si_es_posible(configuracion.CARPETA_IMAGENES_PRODUCTOS)
-        _crear_carpeta_si_es_posible(configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR)
 
         # Bloque: datos iniciales (administrador y registro de suscripción)
         db = SesionLocal()
@@ -154,25 +137,22 @@ def inicializar_sistema() -> None:
 
 @asynccontextmanager
 async def ciclo_de_vida(app: FastAPI):
-    """Arranque y apagado del servidor (en Vercel este evento puede no ejecutarse)."""
+    """Arranque del servidor (en Vercel este evento puede no ejecutarse)."""
     await run_in_threadpool(inicializar_sistema)
-
-    # La liberación automática de bloqueos de mesa solo existe fuera de Vercel
-    tarea_expiracion = None
-    if not ES_VERCEL:
-        tarea_expiracion = asyncio.create_task(tarea_periodica_expiracion_bloqueos())
-
     yield
 
-    if tarea_expiracion:
-        tarea_expiracion.cancel()
 
+# En producción no se publica la documentación interactiva de la API
+_docs_activos = not configuracion.es_produccion
 
 app = FastAPI(
     title="API - Sistema de Administración",
-    description="Backend con gestión de módulos, autenticación, reportes, control de suscripción mensual, cuentas de pago, monitoreo interno y vinculación de dispositivos por QR.",
-    version="1.7.0",
+    description="Backend con gestión de módulos, autenticación, reportes, control de suscripción mensual, cuentas de pago, monitoreo interno y bloqueo colaborativo de mesas.",
+    version="2.0.0",
     lifespan=ciclo_de_vida,
+    docs_url="/docs" if _docs_activos else None,
+    redoc_url="/redoc" if _docs_activos else None,
+    openapi_url="/openapi.json" if _docs_activos else None,
 )
 
 # --- Limitador de peticiones (protección contra fuerza bruta y abuso) ---
@@ -198,6 +178,48 @@ async def manejador_errores_no_controlados(request: Request, excepcion: Exceptio
 
 
 @app.middleware("http")
+async def verificar_bloqueo_suscripcion(request: Request, call_next):
+    """
+    Bloquea toda la API con un 423 (Locked) cuando el ciclo de pago mensual está
+    vencido, excepto en las rutas necesarias para iniciar sesión, ver el estado de
+    la suscripción y cargar los QR de pago.
+    """
+    if request.method == "OPTIONS" or any(
+        request.url.path.startswith(ruta) for ruta in RUTAS_EXCLUIDAS_DE_BLOQUEO
+    ):
+        return await call_next(request)
+
+    if request.url.path.startswith("/api"):
+        db = SesionLocal()
+        try:
+            if esta_bloqueado(obtener_suscripcion(db)):
+                registrar_seguridad("Intento de uso con el sistema bloqueado por suscripción", request=request)
+                return JSONResponse(
+                    status_code=423,
+                    content={
+                        "detail": "El sistema está bloqueado por falta de pago. Comunícate con el proveedor para desbloquearlo."
+                    },
+                )
+        finally:
+            db.close()
+
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def registrar_monitoreo(request: Request, call_next):
+    """Registra cada petición en accesos.log y los eventos sospechosos en seguridad.log."""
+    respuesta = await call_next(request)
+
+    if request.method != "OPTIONS" and not request.url.path.startswith("/uploads"):
+        registrar_acceso(request, respuesta.status_code)
+        if respuesta.status_code in CODIGOS_SOSPECHOSOS:
+            registrar_seguridad(f"Respuesta {respuesta.status_code} en {request.url.path}", request=request)
+
+    return respuesta
+
+
+@app.middleware("http")
 async def agregar_cabeceras_seguridad(request: Request, call_next):
     """Agrega cabeceras HTTP que mitigan XSS, clickjacking y sniffing de tipo MIME."""
     respuesta = await call_next(request)
@@ -216,55 +238,10 @@ async def agregar_cabeceras_seguridad(request: Request, call_next):
 
 
 @app.middleware("http")
-async def registrar_monitoreo(request: Request, call_next):
-    """Registra cada petición en accesos.log y los eventos sospechosos en seguridad.log."""
-    respuesta = await call_next(request)
-
-    if request.method != "OPTIONS" and not request.url.path.startswith("/uploads"):
-        registrar_acceso(request, respuesta.status_code)
-
-        if respuesta.status_code in CODIGOS_SOSPECHOSOS:
-            registrar_seguridad(f"Respuesta {respuesta.status_code} en {request.url.path}", request=request)
-
-    return respuesta
-
-
-@app.middleware("http")
-async def verificar_bloqueo_suscripcion(request: Request, call_next):
-    """
-    Bloquea toda la API con un 423 (Locked) cuando el ciclo de pago mensual
-    está vencido, excepto en las rutas necesarias para iniciar sesión, ver el
-    estado de la suscripción y cargar los QR de pago.
-    """
-    if request.method == "OPTIONS" or any(
-        request.url.path.startswith(ruta) for ruta in RUTAS_EXCLUIDAS_DE_BLOQUEO
-    ):
-        return await call_next(request)
-
-    if request.url.path.startswith("/api"):
-        db = SesionLocal()
-        try:
-            suscripcion = obtener_suscripcion(db)
-            if esta_bloqueado(suscripcion):
-                registrar_seguridad("Intento de uso con el sistema bloqueado por suscripción", request=request)
-                return JSONResponse(
-                    status_code=423,
-                    content={
-                        "detail": "El sistema está bloqueado por falta de pago. Comunícate con el proveedor para desbloquearlo."
-                    },
-                )
-        finally:
-            db.close()
-
-    return await call_next(request)
-
-
-@app.middleware("http")
 async def asegurar_inicializacion(request: Request, call_next):
     """
-    Garantiza que la base de datos esté lista antes de atender cualquier
-    petición (necesario en Vercel, donde no hay evento de arranque fiable).
-    Se declara después de los demás para ejecutarse antes que ellos.
+    Garantiza que la base de datos esté lista antes de atender cualquier petición
+    (necesario en Vercel, donde no hay evento de arranque fiable).
     """
     if not _estado_inicio["listo"] and request.method != "OPTIONS":
         try:
@@ -278,8 +255,7 @@ async def asegurar_inicializacion(request: Request, call_next):
     return await call_next(request)
 
 
-# --- CORS: solo se permiten los orígenes configurados en las variables de entorno.
-# Se registra AL FINAL para ser el middleware más externo (ver nota al inicio). ---
+# --- CORS: solo los orígenes configurados. Se registra AL FINAL para ser el más externo. ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=configuracion.lista_origenes_cors,
@@ -289,30 +265,29 @@ app.add_middleware(
 )
 
 
-def _montar_estaticos(ruta_url: str, carpeta: str, nombre: str) -> None:
+def _montar_estaticos(ruta_url: str, carpeta_relativa: str, nombre: str) -> None:
     """
-    Sirve una carpeta como archivos estáticos solo si existe. En Vercel, la
-    carpeta de imágenes subidas no existe (disco de solo lectura), y montar
-    una carpeta inexistente haría fallar el arranque completo.
+    Sirve una carpeta incluida en el despliegue (logo, QR de pago) como archivos
+    estáticos, solo si existe. La ruta se resuelve desde la raíz del backend.
     """
-    _crear_carpeta_si_es_posible(carpeta)
+    carpeta = ruta_absoluta(carpeta_relativa)
     if os.path.isdir(carpeta):
         app.mount(ruta_url, StaticFiles(directory=carpeta), name=nombre)
 
 
-# Imágenes de productos ya procesadas
-_montar_estaticos("/uploads/productos", configuracion.CARPETA_IMAGENES_PRODUCTOS, "imagenes_productos")
-
-# QR de las cuentas de pago del proveedor. Debe montarse ANTES que "/imagenes",
-# porque Starlette resuelve los montajes en el orden en que se registran.
+# QR de las cuentas de pago. Debe montarse ANTES que "/imagenes" (Starlette resuelve en orden).
 _montar_estaticos("/imagenes/cuentas", configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR, "imagenes_cuentas")
 
 # Carpeta general "imagenes" (logo.png, favicon), derivada de la carpeta de cuentas
-CARPETA_IMAGENES_BASE = os.path.dirname(configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR.rstrip("/"))
-_montar_estaticos("/imagenes", CARPETA_IMAGENES_BASE, "imagenes_generales")
+_montar_estaticos(
+    "/imagenes",
+    os.path.dirname(configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR.rstrip("/")),
+    "imagenes_generales",
+)
 
 
-# --- Registro de routers del núcleo de la API ---
+# --- Registro de routers ---
+app.include_router(archivos.router)  # Imágenes de productos desde la base de datos
 app.include_router(auth.router)
 app.include_router(categorias.router)
 app.include_router(productos.router)
@@ -328,10 +303,6 @@ app.include_router(router_escaner)
 app.include_router(router_qr)
 app.include_router(router_suscripcion)
 app.include_router(router_logs)
-
-# Mesas en tiempo real (WebSocket): solo disponible fuera de Vercel
-if not ES_VERCEL:
-    app.include_router(router_mesas_tiempo_real)
 
 
 @app.get("/api/salud", tags=["Sistema"])

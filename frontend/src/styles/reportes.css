@@ -1,0 +1,10 @@
+/* frontend/src/styles/reportes.css */
+/* Reportes: descripción del reporte seleccionado y espaciador de la barra de
+   filtros. Se apoya en catalogo.css, dashboard.css y compras.css. */
+
+.reporte-descripcion { margin: -6px 0 0; font-size: 0.88rem; }
+.reporte-espacio { flex: 1; }
+
+@media (max-width: 767.98px) {
+  .reporte-espacio { display: none; }
+}

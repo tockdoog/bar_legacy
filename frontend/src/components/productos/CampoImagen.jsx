@@ -1,19 +1,22 @@
 // frontend/src/components/productos/CampoImagen.jsx
-// Selector de imagen del producto: vista previa, validación de tipo y tamaño
-// (las mismas reglas del backend: JPG, PNG o WEBP de hasta 5 MB) y opción de quitarla.
+// Selector de imagen del producto: vista previa, validación de tipo (JPG, PNG o
+// WEBP), optimización automática en el navegador (ver utils/imagen.js) y opción
+// de quitarla. Acepta originales de hasta 15 MB porque se reducen antes de subir.
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Package, Trash2 } from 'lucide-react';
+import { ImagePlus, Loader2, Package, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { urlImagen } from '../../services/api.js';
+import { comprimirImagen } from '../../utils/imagen.js';
 
 const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp'];
-const TAMANO_MAXIMO = 5 * 1024 * 1024;
+const TAMANO_MAXIMO_ORIGINAL = 15 * 1024 * 1024;
 
 export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccionar, onQuitar, deshabilitado }) {
   const entrada = useRef(null);
   const [vistaPrevia, setVistaPrevia] = useState(null);
+  const [procesando, setProcesando] = useState(false);
 
   // Bloque: crea y libera la URL temporal de la vista previa del archivo elegido
   useEffect(() => {
@@ -28,8 +31,8 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
 
   const mostrada = vistaPrevia || (!quitada ? urlImagen(imagenActual) : null);
 
-  // Bloque: valida el archivo antes de aceptarlo
-  function alElegir(evento) {
+  // Bloque: valida el archivo, lo optimiza y lo entrega al formulario
+  async function alElegir(evento) {
     const elegido = evento.target.files?.[0];
     evento.target.value = '';
     if (!elegido) return;
@@ -37,12 +40,21 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
       toast.error('Formato no permitido. Usa una imagen JPG, PNG o WEBP.');
       return;
     }
-    if (elegido.size > TAMANO_MAXIMO) {
-      toast.error('La imagen no puede superar los 5 MB.');
+    if (elegido.size > TAMANO_MAXIMO_ORIGINAL) {
+      toast.error('La imagen original no puede superar los 15 MB.');
       return;
     }
-    onSeleccionar(elegido);
+    setProcesando(true);
+    try {
+      onSeleccionar(await comprimirImagen(elegido));
+    } catch {
+      toast.error('No se pudo procesar la imagen. Prueba con otra.');
+    } finally {
+      setProcesando(false);
+    }
   }
+
+  const bloqueado = deshabilitado || procesando;
 
   return (
     <div className="imagen-campo">
@@ -51,15 +63,16 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
       </div>
       <div className="imagen-acciones">
         <input ref={entrada} type="file" accept="image/jpeg,image/png,image/webp" onChange={alElegir} hidden />
-        <button type="button" className="boton boton-secundario boton-compacto" onClick={() => entrada.current?.click()} disabled={deshabilitado}>
-          <ImagePlus size={16} aria-hidden="true" /> {mostrada ? 'Cambiar imagen' : 'Agregar imagen'}
+        <button type="button" className="boton boton-secundario boton-compacto" onClick={() => entrada.current?.click()} disabled={bloqueado}>
+          {procesando ? <Loader2 size={16} className="girar" aria-hidden="true" /> : <ImagePlus size={16} aria-hidden="true" />}
+          {procesando ? 'Procesando…' : mostrada ? 'Cambiar imagen' : 'Agregar imagen'}
         </button>
         {mostrada && (
-          <button type="button" className="boton boton-secundario boton-compacto" onClick={onQuitar} disabled={deshabilitado}>
+          <button type="button" className="boton boton-secundario boton-compacto" onClick={onQuitar} disabled={bloqueado}>
             <Trash2 size={16} aria-hidden="true" /> Quitar
           </button>
         )}
-        <small className="campo-ayuda">JPG, PNG o WEBP, máximo 5 MB.</small>
+        <small className="campo-ayuda">JPG, PNG o WEBP. Se optimiza automáticamente antes de subirla.</small>
       </div>
     </div>
   );

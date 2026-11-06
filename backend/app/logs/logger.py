@@ -1,24 +1,45 @@
 # Ruta: backend/app/logs/logger.py
 # Módulo central de monitoreo interno del sistema. Configura archivos de log
-# con rotación automática dentro de la carpeta física "~/logs" (accesos,
-# seguridad, errores, sistema y negocio) y expone funciones simples para
-# registrar eventos desde cualquier parte del backend, evitando duplicar lógica.
+# con rotación automática (accesos, seguridad, errores, sistema y negocio) y
+# expone funciones simples para registrar eventos desde cualquier parte del backend.
+#
+# CAMBIOS PARA VERCEL: el disco es de solo lectura salvo /tmp. Si la carpeta
+# configurada no se puede escribir, se usa la carpeta temporal del sistema. En
+# Vercel, además, cada línea se envía a la salida estándar para verla en el panel
+# "Logs" del proyecto (los archivos de /tmp se pierden entre invocaciones).
 
 import logging
 import os
+import sys
+import tempfile
 from logging.handlers import RotatingFileHandler
 
 from app.config import configuracion
 
+# Bloque: en Vercel los eventos también salen por consola
+_EN_VERCEL = bool(os.environ.get("VERCEL"))
+
+
+def _resolver_carpeta_logs() -> str:
+    """Devuelve la primera carpeta de logs escribible: la configurada o /tmp/logs."""
+    candidatas = (
+        os.path.expanduser(configuracion.CARPETA_LOGS),
+        os.path.join(tempfile.gettempdir(), "logs"),
+    )
+    for ruta in candidatas:
+        try:
+            os.makedirs(ruta, exist_ok=True)
+            if os.access(ruta, os.W_OK):
+                return ruta
+        except OSError:
+            continue
+    return candidatas[-1]
+
+
 # --- Carpeta física donde se guardan los archivos de log ---
-# Se expande "~" al home real del usuario del sistema operativo.
-CARPETA_LOGS = os.path.expanduser(configuracion.CARPETA_LOGS)
-os.makedirs(CARPETA_LOGS, exist_ok=True)
+CARPETA_LOGS = _resolver_carpeta_logs()
 
 # --- Nombres de archivo permitidos (también usado por el router para evitar path traversal) ---
-# La categoría "negocio" registra acciones sensibles realizadas por usuarios
-# dentro del sistema (cambios de precios, eliminaciones, aperturas de caja,
-# devoluciones, etc.), sin importar el tipo de negocio que use el sistema.
 ARCHIVOS_LOG = {
     "accesos": "accesos.log",
     "seguridad": "seguridad.log",
@@ -38,24 +59,28 @@ _loggers: dict[str, logging.Logger] = {}
 
 
 def _construir_logger(categoria: str) -> logging.Logger:
-    """
-    Crea (una sola vez) un logger con rotación de archivo para una categoría
-    específica: accesos, seguridad, errores, sistema o negocio.
-    """
+    """Crea (una sola vez) un logger con rotación de archivo para una categoría."""
     logger = logging.getLogger(f"monitoreo.{categoria}")
     logger.setLevel(configuracion.NIVEL_LOG)
     logger.propagate = False  # Evita que el mensaje también salga por la consola de uvicorn
 
     if not logger.handlers:
-        ruta_archivo = os.path.join(CARPETA_LOGS, ARCHIVOS_LOG[categoria])
-        manejador = RotatingFileHandler(
-            ruta_archivo,
-            maxBytes=configuracion.LOG_MAX_BYTES,
-            backupCount=configuracion.LOG_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        manejador.setFormatter(_FORMATO)
-        logger.addHandler(manejador)
+        try:
+            manejador = RotatingFileHandler(
+                os.path.join(CARPETA_LOGS, ARCHIVOS_LOG[categoria]),
+                maxBytes=configuracion.LOG_MAX_BYTES,
+                backupCount=configuracion.LOG_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            manejador.setFormatter(_FORMATO)
+            logger.addHandler(manejador)
+        except OSError:
+            pass  # Sin disco escribible, queda solo la salida estándar
+
+        if _EN_VERCEL or not logger.handlers:
+            consola = logging.StreamHandler(sys.stdout)
+            consola.setFormatter(logging.Formatter(f"[{categoria}] %(asctime)s | %(levelname)s | %(message)s"))
+            logger.addHandler(consola)
 
     return logger
 
@@ -69,9 +94,8 @@ def configurar_logging() -> None:
 def _sanear(texto) -> str:
     """
     Elimina saltos de línea y retornos de carro antes de escribir el mensaje.
-    Previene "inyección de logs": evita que un dato controlado por el usuario
-    (ej. un nombre de producto) contenga un salto de línea que falsifique una
-    línea completa del archivo de log.
+    Previene "inyección de logs": un dato controlado por el usuario no puede
+    falsificar una línea completa del archivo.
     """
     if texto is None:
         return ""
@@ -108,11 +132,7 @@ def registrar_acceso(request, codigo_estado: int, usuario: str = "anonimo") -> N
 
 
 def registrar_seguridad(mensaje: str, request=None, usuario: str = "anonimo") -> None:
-    """
-    Registra eventos sospechosos o relevantes de seguridad: intentos de inicio
-    de sesión fallidos, accesos no autorizados, bloqueos por suscripción,
-    exceso de peticiones (fuerza bruta), cambios de rol, etc.
-    """
+    """Registra eventos sospechosos o relevantes de seguridad."""
     ip = _ip_cliente(request)
     texto = f"IP={ip} | usuario={_sanear(usuario)} | {_sanear(mensaje)}"
     _obtener("seguridad").warning(texto)
@@ -129,10 +149,7 @@ def registrar_error(mensaje: str, request=None) -> None:
 
 
 def registrar_sistema(mensaje: str, usuario: str = "sistema") -> None:
-    """
-    Registra eventos administrativos relevantes: arranque/apagado del
-    servidor, creación o edición de usuarios, cambios de configuración sensible.
-    """
+    """Registra eventos administrativos relevantes: arranque, usuarios, configuración."""
     _obtener("sistema").info(f"usuario={_sanear(usuario)} | {_sanear(mensaje)}")
 
 
@@ -143,16 +160,12 @@ def registrar_negocio(
     request=None,
 ) -> None:
     """
-    Registra acciones sensibles de negocio realizadas por un usuario dentro
-    del sistema: modificación de precios, eliminación de registros, apertura
-    o cierre de caja, devoluciones, cambios de inventario manuales, etc.
-    Aplica a cualquier tipo de negocio que use el sistema (no está atado a un
-    rubro específico).
+    Registra acciones sensibles de negocio realizadas por un usuario (cambios de
+    precios, eliminaciones, anulaciones, compras, etc.).
 
-    Parámetros:
-    - accion: descripción corta de la acción (ej. "Modificó el precio de un producto").
+    - accion: descripción corta de la acción.
     - usuario: nombre de usuario que ejecutó la acción.
-    - detalle: información adicional opcional (ej. "Precio anterior: 5.000, nuevo: 6.000").
+    - detalle: información adicional opcional.
     - request: objeto Request de FastAPI, para registrar también la IP de origen.
     """
     ip = _ip_cliente(request)

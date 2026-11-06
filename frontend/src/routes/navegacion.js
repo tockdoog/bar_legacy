@@ -3,6 +3,9 @@
 // permiso necesario para verlos. Lo usan la barra lateral, el encabezado y el
 // enrutador, para no repetir esta información en varios archivos.
 // Ocultar un módulo es solo comodidad visual: el backend valida cada petición.
+//
+// CAMBIO: "Configuración" ya no exige un permiso. Contiene secciones que todos
+// necesitan (cambiar su contraseña); cada sección valida su propio permiso.
 
 import {
   Armchair,
@@ -30,7 +33,7 @@ export const MODULOS = [
   { ruta: '/promociones', etiqueta: 'Promociones', icono: Percent },
   { ruta: '/reportes', etiqueta: 'Reportes', icono: BarChart3, permiso: 'reportes_ver' },
   { ruta: '/usuarios', etiqueta: 'Usuarios', icono: Users, roles: ['administrador'] },
-  { ruta: '/configuracion', etiqueta: 'Configuración', icono: Settings, permiso: 'finanzas_gestionar' },
+  { ruta: '/configuracion', etiqueta: 'Configuración', icono: Settings },
 ];
 
 // Bloque: indica si el usuario actual puede ver un módulo según su rol y permisos

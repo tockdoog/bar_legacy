@@ -1,13 +1,14 @@
 # Ruta: backend/app/models/usuario.py
 # Modelo de base de datos para los usuarios que ingresan al sistema
 # (autenticación, roles y permisos granulares para empleados).
+# CORRECCIÓN: fecha_creacion usa la hora local de Colombia (ahora_colombia).
 
 import enum
-from datetime import datetime, timezone
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, Text
 
 from app.database import Base
+from app.utils.zona_horaria import ahora_colombia
 
 
 class RolUsuario(str, enum.Enum):
@@ -31,20 +32,15 @@ class Usuario(Base):
     rol = Column(Enum(RolUsuario), nullable=False, default=RolUsuario.EMPLEADO)
     activo = Column(Boolean, default=True, nullable=False)
 
-    # Permisos granulares, solo aplicables cuando rol == EMPLEADO. Se guardan
-    # como texto con las claves separadas por coma (ej: "inventario_gestionar,
-    # compras_gestionar") en vez de una tabla aparte, porque la cantidad de
-    # permisos por usuario es pequeña y así se evita una migración más compleja
-    # (tabla intermedia + relaciones) para un caso de uso simple. Un
-    # administrador siempre tiene esta columna vacía: su rol ya le da acceso
-    # completo, ver dependencies.requerir_permiso().
+    # Permisos granulares (solo empleados), guardados como claves separadas por coma.
+    # Un administrador siempre la tiene vacía: su rol ya da acceso completo.
     permisos = Column(Text, nullable=True, default=None)
 
     # Control de intentos fallidos para mitigar ataques de fuerza bruta
     intentos_fallidos = Column(Integer, default=0, nullable=False)
     bloqueado_hasta = Column(DateTime, nullable=True)
 
-    fecha_creacion = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    fecha_creacion = Column(DateTime, default=ahora_colombia)
 
     @property
     def permisos_lista(self) -> list[str]:

@@ -1,5 +1,8 @@
 # Ruta: backend/app/schemas/mesa.py
-# Esquemas de validación de datos para crear, actualizar y mostrar mesas.
+# Esquemas de validación de datos para crear, actualizar y mostrar mesas, y para
+# informar qué usuario tiene bloqueada una mesa.
+
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -25,3 +28,13 @@ class MesaRespuesta(BaseModel):
     venta_abierta_id: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class BloqueoMesaRespuesta(BaseModel):
+    """Quién está atendiendo una mesa. "es_mio" lo calcula el servidor para quien consulta."""
+    mesa_id: int
+    usuario_id: int
+    nombre_completo: str
+    nombre_usuario: str
+    desde: datetime
+    es_mio: bool

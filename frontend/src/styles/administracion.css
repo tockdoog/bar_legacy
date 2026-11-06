@@ -1,0 +1,36 @@
+/* frontend/src/styles/administracion.css */
+/* Usuarios, configuración y pantalla de bloqueo: lista de permisos, tarjetas de
+   cuentas de pago, formulario de desbloqueo, QR y filas de usuarios inactivos.
+   Se carga desde LayoutApp, así que está disponible en todas las pantallas. */
+
+.config-dos { display: grid; gap: 16px; grid-template-columns: 1fr 1.4fr; align-items: start; }
+.config-dos h3, .suscripcion h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 1.05rem; }
+.subtitulo-form { margin: 0 0 6px; font-size: 1rem; }
+.permisos-lista { display: grid; gap: 8px; margin-top: 10px; }
+.permisos-lista .casilla { margin-bottom: 0; }
+.fila-inactiva { opacity: 0.6; }
+
+/* --- Suscripción y bloqueo --- */
+.suscripcion { display: grid; gap: 16px; }
+.cuentas-rejilla { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.cuenta-tarjeta {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px;
+  border: 1px solid var(--gris-suave); border-radius: 12px; background: var(--fondo);
+}
+.cuenta-valor { display: flex; align-items: center; gap: 6px; font-weight: 600; word-break: break-all; }
+.cuenta-tarjeta img { width: 150px; max-width: 100%; height: auto; margin-top: 8px; border-radius: 8px; background: var(--blanco); }
+.desbloqueo-form { display: flex; gap: 10px; flex-wrap: wrap; }
+.desbloqueo-form .campo-caja { flex: 1; min-width: 200px; }
+
+.bloqueo-pantalla { display: grid; gap: 16px; max-width: 860px; margin: 0 auto; }
+.bloqueo-encabezado { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.bloqueo-encabezado h2 { margin: 0; }
+.bloqueo-encabezado p { margin: 0; }
+
+/* --- Código QR --- */
+.qr-resultado { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 16px; }
+.qr-resultado img { border: 1px solid var(--gris-suave); border-radius: 12px; padding: 8px; background: var(--blanco); }
+
+@media (max-width: 899.98px) {
+  .config-dos { grid-template-columns: 1fr; }
+}

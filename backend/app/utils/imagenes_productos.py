@@ -1,66 +1,47 @@
 # Ruta: backend/app/utils/imagenes_productos.py
-# Funciones para validar, procesar y guardar de forma segura las imágenes que
-# se suben para los productos del inventario. Sistema de uso general (no
-# depende de ningún nicho de negocio especifico).
+# Valida, procesa y guarda de forma segura las imágenes de los productos.
+# Precios y negocio no dependen de ningún nicho.
 #
-# MEDIDAS DE SEGURIDAD APLICADAS:
-# - El archivo se abre con Pillow y se vuelve a guardar desde cero: esto descarta
-#   cualquier contenido que no sea realmente una imagen válida (un script o
-#   ejecutable disfrazado con extensión .jpg no logra "abrirse" como imagen y
-#   se rechaza), y también elimina metadatos EXIF que pudieran contener datos
-#   sensibles de quien tomó la foto (ubicación, dispositivo, etc.).
-# - El nombre de archivo final es siempre un UUID generado por el servidor,
-#   nunca el nombre original enviado por el navegador: evita path traversal
-#   (rutas como "../../etc/passwd") y colisiones entre archivos.
-# - Se valida el tamaño máximo ANTES de cargar la imagen completa en memoria,
-#   para no exponer el servidor a archivos gigantes enviados a propósito.
-# - Se limita la cantidad máxima de píxeles que Pillow acepta descomprimir,
-#   para prevenir ataques de "bomba de descompresión" (un archivo pequeño en
-#   disco que al abrirse se expande a una imagen gigantesca en memoria RAM,
-#   pudiendo agotar los recursos del servidor).
-# - La imagen se redimensiona a un lado máximo configurable, controlando el
-#   uso de disco y acelerando la carga en el inventario y el punto de venta.
-# - Al eliminar una imagen del disco, se verifica que la ruta final quede
-#   estrictamente DENTRO de la carpeta de imágenes de productos, como capa
-#   adicional de defensa contra path traversal.
+# CAMBIO: la imagen procesada se guarda en la base de datos (tabla
+# imagenes_producto) y no en disco, porque el disco de Vercel es de solo
+# lectura. La URL pública sigue siendo "/uploads/productos/<uuid>.<ext>".
+#
+# MEDIDAS DE SEGURIDAD (sin cambios):
+# - Pillow abre y vuelve a guardar la imagen: descarta archivos disfrazados y
+#   elimina metadatos EXIF.
+# - El nombre final es un UUID generado por el servidor (sin path traversal).
+# - Se valida el tamaño antes de procesar y se limita el número de píxeles
+#   (protección contra bombas de descompresión).
+# - Se redimensiona a un lado máximo configurable.
 
 import io
 import os
+import re
 import uuid
 
 from fastapi import HTTPException, UploadFile, status
 from PIL import Image, UnidentifiedImageError
-from PIL import Image as ImagenPIL  # Alias solo para acceder a DecompressionBombError
+from PIL import Image as ImagenPIL
 
 from app.config import configuracion
+from app.database import SesionLocal
+from app.models.imagen_producto import ImagenProducto
+from app.utils.rutas import ruta_absoluta
 
-# Tipos de imagen aceptados. Se valida tanto la extensión final como el
-# contenido real (Pillow rechaza cualquier archivo que no sea una de estas).
 FORMATOS_PERMITIDOS = {"JPEG", "PNG", "WEBP"}
 EXTENSION_POR_FORMATO = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
+MIME_POR_FORMATO = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+PATRON_NOMBRE_ARCHIVO = re.compile(r"^[a-f0-9]{32}\.(jpg|png|webp)$")
 
-# Límite de píxeles totales (ancho x alto) que Pillow acepta descomprimir.
-# Una imagen de producto normal jamás necesita más de esto; por encima de
-# este límite, se asume un intento de bomba de descompresión y se rechaza
-# antes de que Pillow reserve la memoria para decodificarla.
-ImagenPIL.MAX_IMAGE_PIXELS = 40_000_000  # ~40 megapíxeles (ej. 7000 x 5700 px)
-
-
-def _ruta_carpeta_imagenes() -> str:
-    """Crea (si no existe) y devuelve la ruta absoluta de la carpeta de imágenes."""
-    carpeta = configuracion.CARPETA_IMAGENES_PRODUCTOS
-    os.makedirs(carpeta, exist_ok=True)
-    return carpeta
+# Límite de píxeles que Pillow acepta descomprimir (~40 megapíxeles)
+ImagenPIL.MAX_IMAGE_PIXELS = 40_000_000
 
 
 async def guardar_imagen_producto(archivo: UploadFile) -> str:
     """
-    Valida, procesa y guarda en disco la imagen subida para un producto.
-    Devuelve la ruta relativa (URL pública) con la que se accede a la imagen,
-    por ejemplo "/uploads/productos/3f9a1c2b.jpg".
-
-    Lanza HTTPException 400 si el archivo no es una imagen válida, excede
-    el tamaño máximo permitido, o supera el límite de píxeles seguro.
+    Valida, procesa y guarda en la base de datos la imagen subida para un producto.
+    Devuelve la URL pública, por ejemplo "/uploads/productos/3f9a1c2b....jpg".
+    Lanza HTTPException 400 si no es una imagen válida o excede los límites.
     """
     # --- Paso 1: leer el contenido y validar el tamaño antes de procesarlo ---
     contenido = await archivo.read()
@@ -74,16 +55,10 @@ async def guardar_imagen_producto(archivo: UploadFile) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo está vacío.")
 
     # --- Paso 2: abrir con Pillow para confirmar que es una imagen real ---
-    # Se capturan tres tipos de error posibles al abrir el archivo:
-    #   - UnidentifiedImageError / OSError: el archivo no es una imagen real
-    #     (por ejemplo, un ejecutable renombrado a ".jpg").
-    #   - DecompressionBombError: la imagen supera MAX_IMAGE_PIXELS, indicio
-    #     de un intento de agotar la memoria del servidor.
     try:
         imagen = Image.open(io.BytesIO(contenido))
-        imagen.verify()  # Verifica la integridad del archivo sin decodificarlo completo
-        # Pillow requiere reabrir el archivo después de verify() para poder usarlo
-        imagen = Image.open(io.BytesIO(contenido))
+        imagen.verify()
+        imagen = Image.open(io.BytesIO(contenido))  # verify() obliga a reabrir
         imagen.load()
     except ImagenPIL.DecompressionBombError:
         raise HTTPException(
@@ -96,67 +71,77 @@ async def guardar_imagen_producto(archivo: UploadFile) -> str:
             detail="El archivo no es una imagen válida (formatos permitidos: JPG, PNG, WEBP).",
         )
 
-    formato_original = (imagen.format or "").upper()
-    if formato_original not in FORMATOS_PERMITIDOS:
+    formato = (imagen.format or "").upper()
+    if formato not in FORMATOS_PERMITIDOS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Formato de imagen no permitido. Usa JPG, PNG o WEBP.",
         )
 
-    # --- Paso 3: normalizar el modo de color y quitar transparencia si es JPEG ---
-    # JPEG no soporta canal alfa; si la imagen original lo tiene (PNG/WEBP con
-    # transparencia) y el formato de salida será JPEG, se aplana sobre blanco.
-    if formato_original == "JPEG" and imagen.mode in ("RGBA", "P"):
+    # --- Paso 3: normalizar el modo de color (JPEG no admite canal alfa) ---
+    if formato == "JPEG" and imagen.mode in ("RGBA", "P"):
         imagen = imagen.convert("RGB")
     elif imagen.mode not in ("RGB", "RGBA"):
         imagen = imagen.convert("RGBA" if "A" in imagen.mode else "RGB")
 
-    # --- Paso 4: redimensionar manteniendo proporción si excede el lado máximo ---
+    # --- Paso 4: redimensionar manteniendo proporción ---
     lado_maximo = configuracion.LADO_MAXIMO_IMAGEN_PX
     if imagen.width > lado_maximo or imagen.height > lado_maximo:
         imagen.thumbnail((lado_maximo, lado_maximo), Image.LANCZOS)
 
-    # --- Paso 5: generar un nombre de archivo aleatorio y guardar en disco ---
-    extension = EXTENSION_POR_FORMATO[formato_original]
-    nombre_archivo = f"{uuid.uuid4().hex}{extension}"
-    ruta_absoluta = os.path.join(_ruta_carpeta_imagenes(), nombre_archivo)
-
-    parametros_guardado = {
+    # --- Paso 5: re-codificar en memoria y guardar en la base de datos ---
+    parametros = {
         "JPEG": {"quality": 85, "optimize": True},
         "PNG": {"optimize": True},
         "WEBP": {"quality": 85},
     }
-    imagen.save(ruta_absoluta, format=formato_original, **parametros_guardado.get(formato_original, {}))
+    salida = io.BytesIO()
+    imagen.save(salida, format=formato, **parametros.get(formato, {}))
 
-    # Ruta pública con la que el frontend podrá acceder a la imagen vía /uploads/...
+    nombre_archivo = f"{uuid.uuid4().hex}{EXTENSION_POR_FORMATO[formato]}"
+    db = SesionLocal()
+    try:
+        db.add(
+            ImagenProducto(
+                nombre=nombre_archivo,
+                tipo_mime=MIME_POR_FORMATO[formato],
+                contenido=salida.getvalue(),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
     return f"/uploads/productos/{nombre_archivo}"
 
 
 def eliminar_imagen_producto(imagen_url: str | None) -> None:
     """
-    Elimina del disco el archivo de imagen asociado a un producto, si existe.
-    No lanza error si el archivo ya no está (por ejemplo, si se borró manualmente).
+    Elimina la imagen de un producto: la fila de la base de datos y, si existiera,
+    un archivo antiguo en disco (imágenes subidas antes de este cambio). Nunca
+    lanza error: no debe impedir la operación principal.
     """
     if not imagen_url:
         return
 
-    carpeta_imagenes = os.path.abspath(_ruta_carpeta_imagenes())
     nombre_archivo = os.path.basename(imagen_url)
-    ruta_absoluta = os.path.abspath(os.path.join(carpeta_imagenes, nombre_archivo))
-
-    # Verifica que la ruta final siga estando dentro de la carpeta de imágenes
-    # de productos. Es una capa adicional de defensa: aunque hoy imagen_url
-    # siempre lo genera el propio servidor (nunca el usuario), esta validación
-    # evita que un cambio futuro en el código permita borrar archivos fuera
-    # de la carpeta esperada.
-    if os.path.commonpath([carpeta_imagenes, ruta_absoluta]) != carpeta_imagenes:
+    # Solo se aceptan nombres generados por el servidor (evita path traversal)
+    if not PATRON_NOMBRE_ARCHIVO.match(nombre_archivo):
         return
 
+    db = SesionLocal()
     try:
-        if os.path.isfile(ruta_absoluta):
-            os.remove(ruta_absoluta)
+        db.query(ImagenProducto).filter(ImagenProducto.nombre == nombre_archivo).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+    # Archivo antiguo en disco (solo local): se borra si existe y es posible
+    ruta = os.path.join(ruta_absoluta(configuracion.CARPETA_IMAGENES_PRODUCTOS), nombre_archivo)
+    try:
+        if os.path.isfile(ruta):
+            os.remove(ruta)
     except OSError:
-        # Si el archivo no se puede borrar por algún motivo de permisos, se
-        # ignora: no debe impedir que la operación principal (guardar/eliminar
-        # el producto) se complete.
         pass

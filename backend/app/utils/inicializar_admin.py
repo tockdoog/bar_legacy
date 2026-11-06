@@ -1,7 +1,10 @@
 # Ruta: backend/app/utils/inicializar_admin.py
-# Crea el primer usuario administrador automáticamente al iniciar el servidor,
-# únicamente si todavía no existe ningún usuario registrado en la base de datos.
+# Crea el primer usuario administrador automáticamente, únicamente si todavía no
+# existe ningún usuario. CORRECCIÓN: si dos instancias arrancan a la vez (Vercel)
+# y ambas intentan crearlo, la segunda captura el error de duplicado en vez de
+# fallar el arranque.
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import configuracion
@@ -10,9 +13,8 @@ from app.security import cifrar_contrasena
 
 
 def crear_administrador_inicial(db: Session) -> None:
-    """Inserta el usuario administrador definido en el .env si la tabla de usuarios está vacía."""
-    existe_algun_usuario = db.query(Usuario).first()
-    if existe_algun_usuario:
+    """Inserta el usuario administrador definido en el entorno si la tabla de usuarios está vacía."""
+    if db.query(Usuario.id).first():
         return  # Ya hay usuarios creados, no se hace nada
 
     admin = Usuario(
@@ -24,4 +26,7 @@ def crear_administrador_inicial(db: Session) -> None:
         activo=True,
     )
     db.add(admin)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # Otra instancia lo creó primero: no hay nada más que hacer

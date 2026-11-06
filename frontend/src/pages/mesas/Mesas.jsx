@@ -1,20 +1,20 @@
 // frontend/src/pages/mesas/Mesas.jsx
 // Plano visual de mesas: libre (verde), ocupada (dorado) y pendiente de pago
-// (rojo), con total acumulado y tiempo de ocupación tomados de las ventas
-// abiertas. Se actualiza solo cada 10 segundos. El administrador puede crear y
-// eliminar mesas libres. Abrir o consultar una mesa lleva al POS.
+// (rojo), con total acumulado, tiempo de ocupación y quién la está atendiendo
+// (bloqueo colaborativo). Se actualiza solo cada 10 segundos. El administrador
+// puede crear y eliminar mesas libres. Abrir o consultar una mesa lleva al POS.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Armchair, Clock, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Armchair, Clock, Loader2, Lock, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import Confirmar from '../../components/common/Confirmar.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { mensajeDeError } from '../../services/api.js';
-import { crearMesa, eliminarMesa, listarMesas } from '../../services/modules/mesasService.js';
+import { crearMesa, eliminarMesa, listarBloqueos, listarMesas } from '../../services/modules/mesasService.js';
 import { abrirVenta, listarVentasAbiertas } from '../../services/modules/ventasService.js';
 import { formatearCOP } from '../../utils/formato.js';
 import { minutosDesde, textoDuracion } from '../../utils/tiempo.js';
@@ -33,6 +33,7 @@ export default function Mesas() {
 
   const [mesas, setMesas] = useState([]);
   const [ventas, setVentas] = useState([]);
+  const [bloqueos, setBloqueos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [reloj, setReloj] = useState(Date.now());
@@ -43,18 +44,22 @@ export default function Mesas() {
   const [numeroNueva, setNumeroNueva] = useState('');
   const [procesando, setProcesando] = useState(false);
 
-  // Bloque: carga mesas y ventas abiertas (para totales y tiempos) en paralelo
+  // Bloque: carga mesas, ventas abiertas y bloqueos en paralelo (los bloqueos son opcionales)
   const cargar = useCallback(async () => {
-    try {
-      const [listaMesas, listaVentas] = await Promise.all([listarMesas(), listarVentasAbiertas()]);
-      setMesas([...listaMesas].sort((a, b) => a.numero.localeCompare(b.numero, 'es', { numeric: true })));
-      setVentas(listaVentas);
+    const [resMesas, resVentas, resBloqueos] = await Promise.allSettled([
+      listarMesas(),
+      listarVentasAbiertas(),
+      listarBloqueos(),
+    ]);
+    if (resMesas.status === 'fulfilled' && resVentas.status === 'fulfilled') {
+      setMesas([...resMesas.value].sort((a, b) => a.numero.localeCompare(b.numero, 'es', { numeric: true })));
+      setVentas(resVentas.value);
       setError('');
-    } catch (fallo) {
-      setError(mensajeDeError(fallo));
-    } finally {
-      setCargando(false);
+    } else {
+      setError(mensajeDeError((resMesas.status === 'rejected' ? resMesas : resVentas).reason));
     }
+    if (resBloqueos.status === 'fulfilled') setBloqueos(resBloqueos.value);
+    setCargando(false);
   }, []);
 
   // Bloque: actualización automática cada 10 s, solo si la pestaña está visible
@@ -70,6 +75,7 @@ export default function Mesas() {
   }, [cargar]);
 
   const ventaPorId = useMemo(() => Object.fromEntries(ventas.map((v) => [v.id, v])), [ventas]);
+  const bloqueoPorMesa = useMemo(() => Object.fromEntries(bloqueos.map((b) => [b.mesa_id, b])), [bloqueos]);
   const conteo = useMemo(
     () => ({
       libre: mesas.filter((m) => m.estado === 'libre').length,
@@ -79,8 +85,13 @@ export default function Mesas() {
     [mesas]
   );
 
-  // Bloque: tocar una mesa. Libre: pide confirmar y abre cuenta; con cuenta: va al POS.
+  // Bloque: tocar una mesa. Si otro usuario la atiende se avisa; libre pide confirmar; con cuenta va al POS.
   function alTocarMesa(mesa) {
+    const bloqueo = bloqueoPorMesa[mesa.id];
+    if (bloqueo && !bloqueo.es_mio) {
+      toast.warning(`La mesa ${mesa.numero} la está atendiendo ${bloqueo.nombre_completo}.`);
+      return;
+    }
     if (mesa.estado === 'libre') {
       setMesaPorAbrir(mesa);
       return;
@@ -178,6 +189,8 @@ export default function Mesas() {
           <AnimatePresence>
             {mesas.map((mesa) => {
               const venta = ventaPorId[mesa.venta_abierta_id];
+              const bloqueo = bloqueoPorMesa[mesa.id];
+              const ajena = bloqueo && !bloqueo.es_mio;
               const minutos = venta ? minutosDesde(venta.fecha_apertura) : null;
               return (
                 <motion.div
@@ -191,9 +204,9 @@ export default function Mesas() {
                 >
                   <button
                     type="button"
-                    className={`mesa ${mesa.estado}`}
+                    className={`mesa ${mesa.estado} ${ajena ? 'bloqueada' : ''}`}
                     onClick={() => alTocarMesa(mesa)}
-                    aria-label={`Mesa ${mesa.numero}, ${ESTADOS[mesa.estado]}`}
+                    aria-label={`Mesa ${mesa.numero}, ${ESTADOS[mesa.estado]}${bloqueo ? `, atendida por ${bloqueo.nombre_completo}` : ''}`}
                   >
                     <span className="mesa-numero">{mesa.numero}</span>
                     <span className="mesa-estado">{ESTADOS[mesa.estado]}</span>
@@ -207,8 +220,13 @@ export default function Mesas() {
                     ) : (
                       <span className="mesa-tiempo">{mesa.estado === 'libre' ? 'Toca para abrir' : 'Sin cuenta'}</span>
                     )}
+                    {bloqueo && (
+                      <span className="mesa-bloqueo">
+                        <Lock size={12} aria-hidden="true" /> {bloqueo.es_mio ? 'Tú' : `@${bloqueo.nombre_usuario}`}
+                      </span>
+                    )}
                   </button>
-                  {esAdmin && mesa.estado === 'libre' && (
+                  {esAdmin && mesa.estado === 'libre' && !bloqueo && (
                     <button type="button" className="mesa-eliminar" onClick={() => setMesaPorEliminar(mesa)} aria-label={`Eliminar mesa ${mesa.numero}`}>
                       <Trash2 size={15} />
                     </button>

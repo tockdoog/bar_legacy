@@ -4,9 +4,11 @@
 // almacenamiento de sesión.
 //
 // SEGURIDAD: el token se guarda en sessionStorage (se borra al cerrar la
-// pestaña). Es un equilibrio entre comodidad y riesgo: el backend usa tokens
-// Bearer, no cookies HttpOnly. Por eso la CSP de vercel.json bloquea scripts
-// externos para reducir el riesgo de XSS.
+// pestaña). El backend usa tokens Bearer, no cookies HttpOnly, por eso la CSP
+// de vercel.json bloquea scripts externos para reducir el riesgo de XSS.
+//
+// CORRECCIÓN: el desbloqueo con clave incorrecta responde 401; ya no se trata
+// como "sesión vencida" (antes cerraba la sesión del administrador).
 
 import axios from 'axios';
 
@@ -17,6 +19,9 @@ const CLAVE_SESION = 'barlegacy.sesion';
 export const urlApi = URL_BASE;
 export const EVENTO_SESION_EXPIRADA = 'barlegacy:sesion-expirada';
 export const EVENTO_SISTEMA_BLOQUEADO = 'barlegacy:sistema-bloqueado';
+
+// Rutas donde un 401 significa "datos incorrectos" y no "sesión vencida"
+const RUTAS_401_PROPIO = ['/api/auth/login', '/api/suscripcion/desbloquear'];
 
 // --- Bloque: manejo de la sesión guardada en el navegador ---
 export function guardarSesion(sesion) {
@@ -73,9 +78,11 @@ api.interceptors.response.use(
   (respuesta) => respuesta,
   (error) => {
     const estado = error.response?.status;
-    const esLogin = String(error.config?.url || '').includes('/api/auth/login');
+    const url = String(error.config?.url || '');
+    const es401Propio = RUTAS_401_PROPIO.some((ruta) => url.includes(ruta));
+    const esLogin = url.includes('/api/auth/login');
 
-    if (estado === 401 && !esLogin) {
+    if (estado === 401 && !es401Propio) {
       limpiarSesion();
       window.dispatchEvent(new CustomEvent(EVENTO_SESION_EXPIRADA));
     }

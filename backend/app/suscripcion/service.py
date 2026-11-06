@@ -1,107 +1,105 @@
 # Ruta: backend/app/suscripcion/service.py
-# Lógica de negocio del módulo de suscripción: obtener/crear el registro de
-# pago, calcular días restantes, determinar si el sistema debe bloquearse,
-# procesar los intentos de desbloqueo con protección contra fuerza bruta, y
-# listar las cuentas de pago fijas del proveedor del software (definidas en
-# cuentas_proveedor.py, no en base de datos).
+# Lógica de negocio del módulo de suscripción: obtener/crear el registro de pago,
+# calcular días restantes, determinar si el sistema debe bloquearse, procesar los
+# intentos de desbloqueo con protección contra fuerza bruta y listar las cuentas
+# de pago fijas del proveedor (definidas en cuentas_proveedor.py).
+#
+# CAMBIOS: todas las fechas usan la hora local de Colombia sin zona (ahora_colombia),
+# como el resto del sistema. Los registros ya guardados en UTC quedan desplazados
+# 5 horas hacia adelante la primera vez (la suscripción vence 5 h más tarde); no
+# afecta el funcionamiento. Se tolera la creación simultánea del registro único
+# (varias instancias arrancando a la vez) y las rutas son absolutas.
 
 import math
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import configuracion
 from app.suscripcion.cuentas_proveedor import CUENTAS_PROVEEDOR
 from app.suscripcion.models import Suscripcion
 from app.suscripcion.schemas import CuentaProveedorRespuesta
+from app.utils.rutas import ruta_absoluta
+from app.utils.zona_horaria import ZONA_HORARIA_COLOMBIA, ahora_colombia
 
 # Identificador fijo: solo existe un registro de suscripción para todo el sistema
 ID_SUSCRIPCION_UNICA = 1
 
 
-def _normalizar_utc(fecha: datetime) -> datetime:
-    """
-    Garantiza que una fecha tenga zona horaria UTC. SQLite no conserva de forma
-    confiable la zona horaria al guardar/leer, por lo que se asume UTC cuando
-    la fecha llega "ingenua" (sin tzinfo), evitando errores al comparar fechas.
-    """
-    if fecha.tzinfo is None:
-        return fecha.replace(tzinfo=timezone.utc)
+def _a_hora_colombia(fecha: datetime) -> datetime:
+    """Devuelve la fecha sin zona en hora de Colombia (si llegara con zona, la convierte)."""
+    if fecha.tzinfo is not None:
+        return fecha.astimezone(ZONA_HORARIA_COLOMBIA).replace(tzinfo=None)
     return fecha
 
 
 def obtener_suscripcion(db: Session) -> Suscripcion:
     """
-    Devuelve el registro único de suscripción. Si es la primera vez que arranca
-    el sistema, lo crea con un ciclo nuevo que inicia hoy.
+    Devuelve el registro único de suscripción. Si es la primera vez que arranca el
+    sistema, lo crea con un ciclo que inicia hoy. Si otra instancia lo creó al mismo
+    tiempo, se descarta el intento propio y se lee el existente.
     """
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == ID_SUSCRIPCION_UNICA).first()
+    if suscripcion is not None:
+        return suscripcion
 
-    if suscripcion is None:
-        ahora = datetime.now(timezone.utc)
-        suscripcion = Suscripcion(
-            id=ID_SUSCRIPCION_UNICA,
-            fecha_inicio=ahora,
-            fecha_vencimiento=ahora + timedelta(days=configuracion.DIAS_SUSCRIPCION),
-        )
-        db.add(suscripcion)
+    ahora = ahora_colombia()
+    nueva = Suscripcion(
+        id=ID_SUSCRIPCION_UNICA,
+        fecha_inicio=ahora,
+        fecha_vencimiento=ahora + timedelta(days=configuracion.DIAS_SUSCRIPCION),
+    )
+    db.add(nueva)
+    try:
         db.commit()
-        db.refresh(suscripcion)
-
-    return suscripcion
+    except IntegrityError:
+        db.rollback()
+        return db.query(Suscripcion).filter(Suscripcion.id == ID_SUSCRIPCION_UNICA).one()
+    db.refresh(nueva)
+    return nueva
 
 
 def calcular_dias_restantes(suscripcion: Suscripcion) -> int:
     """Calcula cuántos días completos faltan para el vencimiento (0 si ya venció)."""
-    ahora = datetime.now(timezone.utc)
-    vencimiento = _normalizar_utc(suscripcion.fecha_vencimiento)
-    segundos_restantes = (vencimiento - ahora).total_seconds()
-
-    if segundos_restantes <= 0:
+    segundos = (_a_hora_colombia(suscripcion.fecha_vencimiento) - ahora_colombia()).total_seconds()
+    if segundos <= 0:
         return 0
-
-    return math.ceil(segundos_restantes / 86400)
+    return math.ceil(segundos / 86400)
 
 
 def esta_bloqueado(suscripcion: Suscripcion) -> bool:
     """El sistema se bloquea automáticamente en el instante en que vence la suscripción."""
-    ahora = datetime.now(timezone.utc)
-    return ahora >= _normalizar_utc(suscripcion.fecha_vencimiento)
+    return ahora_colombia() >= _a_hora_colombia(suscripcion.fecha_vencimiento)
 
 
 def intentar_desbloqueo(db: Session, clave_ingresada: str) -> tuple[bool, str]:
     """
-    Valida la contraseña maestra de desbloqueo (proporcionada por ti, el
-    proveedor del software, cuando el cliente ya pagó) y, si es correcta,
-    renueva el ciclo de suscripción por un mes más a partir de este momento.
+    Valida la clave maestra de desbloqueo (entregada por el proveedor tras el pago)
+    y, si es correcta, renueva el ciclo por un mes más desde este momento.
 
-    Seguridad aplicada:
-    - Comparación con secrets.compare_digest para evitar ataques de temporización.
-    - Bloqueo temporal tras varios intentos fallidos (fuerza bruta sobre la clave).
-    - La clave nunca se registra en logs ni se refleja en los mensajes de error.
+    Seguridad: comparación con secrets.compare_digest (sin ataques de temporización),
+    bloqueo temporal tras varios intentos fallidos y la clave nunca se registra.
     """
     suscripcion = obtener_suscripcion(db)
-    ahora = datetime.now(timezone.utc)
+    ahora = ahora_colombia()
 
-    if suscripcion.bloqueado_hasta and ahora < _normalizar_utc(suscripcion.bloqueado_hasta):
-        minutos_restantes = math.ceil(
-            (_normalizar_utc(suscripcion.bloqueado_hasta) - ahora).total_seconds() / 60
-        )
-        return False, f"Demasiados intentos fallidos. Intenta de nuevo en {minutos_restantes} minuto(s)."
+    if suscripcion.bloqueado_hasta and ahora < _a_hora_colombia(suscripcion.bloqueado_hasta):
+        minutos = math.ceil((_a_hora_colombia(suscripcion.bloqueado_hasta) - ahora).total_seconds() / 60)
+        return False, f"Demasiados intentos fallidos. Intenta de nuevo en {minutos} minuto(s)."
 
-    clave_correcta = secrets.compare_digest(clave_ingresada, configuracion.CLAVE_MAESTRA_DESBLOQUEO)
+    # compare_digest necesita bytes para aceptar caracteres no ASCII sin lanzar TypeError
+    clave_correcta = secrets.compare_digest(
+        clave_ingresada.encode("utf-8"), configuracion.CLAVE_MAESTRA_DESBLOQUEO.encode("utf-8")
+    )
 
     if not clave_correcta:
         suscripcion.intentos_fallidos += 1
-
         if suscripcion.intentos_fallidos >= configuracion.UMBRAL_INTENTOS_DESBLOQUEO:
-            suscripcion.bloqueado_hasta = ahora + timedelta(
-                minutes=configuracion.MINUTOS_BLOQUEO_INTENTOS_DESBLOQUEO
-            )
+            suscripcion.bloqueado_hasta = ahora + timedelta(minutes=configuracion.MINUTOS_BLOQUEO_INTENTOS_DESBLOQUEO)
             suscripcion.intentos_fallidos = 0
-
         db.commit()
         return False, "La contraseña de desbloqueo es incorrecta."
 
@@ -121,23 +119,17 @@ def intentar_desbloqueo(db: Session, clave_ingresada: str) -> tuple[bool, str]:
 
 def listar_cuentas_proveedor() -> list[CuentaProveedorRespuesta]:
     """
-    Devuelve las cuentas de pago definidas en cuentas_proveedor.py, resolviendo
-    la URL pública del QR únicamente si el archivo realmente existe en disco
-    en backend/imagenes/cuentas/. Si el proveedor olvidó copiar la imagen (o
-    la cuenta no tiene QR), imagen_url queda en None y el frontend simplemente
-    no dibuja la imagen para esa cuenta, sin romper el resto de la pantalla.
+    Devuelve las cuentas de pago de cuentas_proveedor.py, resolviendo la URL
+    pública del QR solo si el archivo existe en backend/imagenes/cuentas/.
     """
-    carpeta_cuentas = configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR
+    carpeta_cuentas = ruta_absoluta(configuracion.CARPETA_IMAGENES_CUENTAS_PROVEEDOR)
     resultado: list[CuentaProveedorRespuesta] = []
 
     for cuenta in CUENTAS_PROVEEDOR:
         imagen_url = None
         nombre_archivo = cuenta.get("archivo_imagen")
-
-        if nombre_archivo:
-            ruta_absoluta = os.path.join(carpeta_cuentas, nombre_archivo)
-            if os.path.isfile(ruta_absoluta):
-                imagen_url = f"/imagenes/cuentas/{nombre_archivo}"
+        if nombre_archivo and os.path.isfile(os.path.join(carpeta_cuentas, nombre_archivo)):
+            imagen_url = f"/imagenes/cuentas/{nombre_archivo}"
 
         resultado.append(
             CuentaProveedorRespuesta(

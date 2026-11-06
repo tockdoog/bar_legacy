@@ -1,6 +1,7 @@
 /* frontend/src/styles/mesas.css */
 /* Plano de mesas: tarjetas de color por estado (libre en verde, ocupada en
-   dorado, pendiente de pago en rojo) con transición suave entre estados. */
+   dorado, pendiente de pago en rojo) con transición suave entre estados e
+   insignia de quién está atendiendo la mesa (bloqueo colaborativo). */
 
 .mesas { display: grid; gap: 16px; }
 .mesas-barra { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -13,13 +14,14 @@
   width: 100%; min-height: 150px; padding: 14px; cursor: pointer; text-align: left;
   display: flex; flex-direction: column; gap: 4px; justify-content: center;
   border: 2px solid; border-radius: var(--radio); font-family: var(--fuente-cuerpo); color: var(--texto);
-  transition: background 0.3s ease, border-color 0.3s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
 }
 .mesa:hover { transform: translateY(-3px); box-shadow: var(--sombra); }
 .mesa:active { transform: scale(0.98); }
 .mesa.libre { background: rgba(47, 143, 91, 0.1); border-color: var(--verde); }
 .mesa.ocupada { background: rgba(201, 162, 39, 0.16); border-color: var(--dorado); }
 .mesa.pendiente_pago { background: rgba(192, 57, 43, 0.1); border-color: var(--rojo); }
+.mesa.bloqueada { opacity: 0.7; }
 
 .mesa-numero { font-family: var(--fuente-titulos); font-size: 2rem; font-weight: 700; line-height: 1; }
 .mesa-estado { font-size: 0.8rem; font-weight: 600; }
@@ -28,6 +30,13 @@
 .mesa.pendiente_pago .mesa-estado { color: var(--rojo); }
 .mesa-total { font-size: 1.1rem; margin-top: 4px; }
 .mesa-tiempo { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--texto-suave); }
+
+/* Insignia de quién atiende la mesa */
+.mesa-bloqueo {
+  display: inline-flex; align-items: center; gap: 4px; width: fit-content; margin-top: 4px; padding: 2px 8px;
+  border-radius: 999px; background: var(--blanco); border: 1px solid var(--gris-suave);
+  font-size: 0.74rem; font-weight: 600; color: var(--texto);
+}
 
 .mesa-eliminar {
   position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; display: grid; place-items: center;

@@ -1,7 +1,6 @@
 # Ruta: backend/requirements.txt
 # Dependencias del backend. Instalar con: pip install -r requirements.txt
-# Las versiones se mantienen fijas (==) para evitar cambios de comportamiento
-# por actualizaciones automáticas.
+# Las versiones se mantienen fijas (==) para evitar cambios de comportamiento.
 
 # --- Framework principal ---
 fastapi==0.115.0
@@ -11,6 +10,9 @@ uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 # Driver de PostgreSQL (Neon). "binary" incluye la librería nativa, sin compilar.
 psycopg[binary]==3.2.3
+
+# --- Zona horaria: datos de America/Bogota en entornos sin base de zonas (Vercel) ---
+tzdata==2024.2
 
 # --- Validación de datos ---
 pydantic==2.9.2

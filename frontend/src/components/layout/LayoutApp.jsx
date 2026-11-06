@@ -2,17 +2,23 @@
 // Estructura general de las pantallas privadas: barra lateral, encabezado,
 // aviso de suscripción y el contenido de cada módulo con una transición suave.
 // En móviles la barra lateral es un panel deslizante con fondo oscurecido.
+//
+// CAMBIOS: si la suscripción está bloqueada se muestra la pantalla de bloqueo en
+// lugar del módulo, y el estado se vuelve a consultar al recibir un 423.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Lock } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 import Sidebar from './Sidebar.jsx';
 import Encabezado from './Encabezado.jsx';
+import PantallaBloqueo from './PantallaBloqueo.jsx';
+import { EVENTO_SISTEMA_BLOQUEADO } from '../../services/api.js';
 import { obtenerEstadoSuscripcion } from '../../services/modules/suscripcionService.js';
 import { formatearCOP } from '../../utils/formato.js';
 import '../../styles/layout.css';
+import '../../styles/administracion.css';
 
 export default function LayoutApp() {
   const ubicacion = useLocation();
@@ -24,23 +30,25 @@ export default function LayoutApp() {
     setMenuAbierto(false);
   }, [ubicacion.pathname]);
 
-  // Bloque: consulta el estado de la suscripción al entrar y cada 10 minutos
-  useEffect(() => {
-    let activo = true;
-    const cargar = () =>
-      obtenerEstadoSuscripcion()
-        .then((datos) => activo && setSuscripcion(datos))
-        .catch(() => {});
-    cargar();
-    const temporizador = setInterval(cargar, 10 * 60 * 1000);
-    return () => {
-      activo = false;
-      clearInterval(temporizador);
-    };
+  // Bloque: consulta el estado de la suscripción al entrar, cada 10 minutos y cuando el backend responde 423
+  const cargarEstado = useCallback(() => {
+    obtenerEstadoSuscripcion()
+      .then(setSuscripcion)
+      .catch(() => {});
   }, []);
 
-  // Bloque: decide si se muestra un aviso (bloqueado, o falta 1 día o menos)
-  const mostrarAviso = suscripcion && (suscripcion.bloqueado || suscripcion.dias_restantes <= 1);
+  useEffect(() => {
+    cargarEstado();
+    const temporizador = setInterval(cargarEstado, 10 * 60 * 1000);
+    window.addEventListener(EVENTO_SISTEMA_BLOQUEADO, cargarEstado);
+    return () => {
+      clearInterval(temporizador);
+      window.removeEventListener(EVENTO_SISTEMA_BLOQUEADO, cargarEstado);
+    };
+  }, [cargarEstado]);
+
+  const bloqueado = Boolean(suscripcion?.bloqueado);
+  const avisoProximo = suscripcion && !bloqueado && suscripcion.dias_restantes <= 1;
 
   return (
     <div className="app-contenedor">
@@ -65,29 +73,24 @@ export default function LayoutApp() {
       <div className="app-principal">
         <Encabezado onAbrirMenu={() => setMenuAbierto(true)} />
 
-        {mostrarAviso && (
-          <div
-            className={`aviso-suscripcion ${suscripcion.bloqueado ? 'critico' : ''}`}
-            role="alert"
-          >
-            {suscripcion.bloqueado ? <Lock size={18} aria-hidden="true" /> : <AlertTriangle size={18} aria-hidden="true" />}
+        {avisoProximo && (
+          <div className="aviso-suscripcion" role="alert">
+            <AlertTriangle size={18} aria-hidden="true" />
             <span>
-              {suscripcion.mensaje ||
-                'La suscripción está próxima a vencer.'}
-              {suscripcion.valor_mensual_cop > 0 &&
-                ` Valor mensual: ${formatearCOP(suscripcion.valor_mensual_cop)}.`}
+              {suscripcion.mensaje || 'La suscripción está próxima a vencer.'}
+              {suscripcion.valor_mensual_cop > 0 && ` Valor mensual: ${formatearCOP(suscripcion.valor_mensual_cop)}.`}
             </span>
           </div>
         )}
 
         <main className="app-contenido" id="contenido" tabIndex={-1}>
           <motion.div
-            key={ubicacion.pathname}
+            key={bloqueado ? 'bloqueo' : ubicacion.pathname}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, ease: 'easeOut' }}
           >
-            <Outlet />
+            {bloqueado ? <PantallaBloqueo estado={suscripcion} onActualizado={setSuscripcion} /> : <Outlet />}
           </motion.div>
         </main>
       </div>

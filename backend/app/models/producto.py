@@ -1,17 +1,15 @@
 # Ruta: backend/app/models/producto.py
 # Modelo de base de datos para los productos del inventario general del negocio.
-# Cada producto puede usar la configuracion global de impuesto y margen
-# (definida en el modulo de Analisis Financiero), o tener su PROPIA
-# configuracion de impuesto y margen si "usar_configuracion_global" es False
-# (ej: un producto exento de impuesto mientras el resto del negocio cobra IVA).
-
-from datetime import datetime, timezone
+# Cada producto puede usar la configuración global de impuesto y margen
+# (módulo de Análisis Financiero) o tener la suya si "usar_configuracion_global"
+# es False. CORRECCIÓN: fecha_creacion usa la hora local de Colombia.
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 
 from app.database import Base
 from app.models.finanzas import TipoImpuesto
+from app.utils.zona_horaria import ahora_colombia
 
 
 class Producto(Base):
@@ -27,33 +25,26 @@ class Producto(Base):
     categoria_id = Column(Integer, ForeignKey("categorias.id"), nullable=True)
     categoria = relationship("Categoria", back_populates="productos")
 
-    # Presentación libre (ej: unidad, paquete, caja) para no atar el sistema a un solo tipo de negocio
+    # Presentación libre (ej: unidad, paquete, caja)
     presentacion = Column(String(60), nullable=False, default="unidad")
 
-    # Precios en pesos colombianos (COP), almacenados como números enteros sin decimales
+    # Precios en pesos colombianos (COP)
     precio_compra = Column(Float, nullable=False, default=0)
     precio_venta = Column(Float, nullable=False, default=0)
 
     stock_actual = Column(Integer, nullable=False, default=0)
     stock_minimo = Column(Integer, nullable=False, default=0)
 
-    # --- Configuracion propia de impuesto y margen (Analisis Financiero) ---
-    # Si "usar_configuracion_global" es True (valor por defecto), el producto
-    # hereda el impuesto y el margen definidos en ConfiguracionFinanciera
-    # (modulo de Analisis Financiero). Si es False, se usan los campos
-    # "propio" de abajo en su lugar. Todos con default para no romper
-    # productos ya existentes al agregar esta columna.
+    # Configuración propia de impuesto y margen (Análisis Financiero)
     usar_configuracion_global = Column(Boolean, nullable=False, default=True)
     tipo_impuesto_propio = Column(Enum(TipoImpuesto), nullable=True)
     porcentaje_impuesto_propio = Column(Float, nullable=True)
     nombre_impuesto_propio_personalizado = Column(String(80), nullable=True)
     margen_utilidad_propio = Column(Float, nullable=True)
 
-    # Ruta relativa de la imagen del producto (ej: "/uploads/productos/<uuid>.jpg").
-    # Se guarda solo la ruta, nunca el archivo en sí; el archivo vive en disco
-    # dentro de la carpeta configurada en CARPETA_IMAGENES_PRODUCTOS. Es opcional:
-    # un producto sin foto simplemente tiene este campo en None.
+    # Ruta pública de la imagen (ej: "/uploads/productos/<uuid>.jpg"). El archivo
+    # vive en la tabla imagenes_producto (ver models/imagen_producto.py).
     imagen_url = Column(String(255), nullable=True)
 
     activo = Column(Boolean, default=True, nullable=False)
-    fecha_creacion = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    fecha_creacion = Column(DateTime, default=ahora_colombia)
