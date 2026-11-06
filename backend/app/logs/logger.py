@@ -1,23 +1,40 @@
 # Ruta: backend/app/logs/logger.py
-# Módulo central de monitoreo interno del sistema. Configura archivos de log
-# con rotación automática (accesos, seguridad, errores, sistema y negocio) y
-# expone funciones simples para registrar eventos desde cualquier parte del backend.
+# Módulo central de monitoreo interno. Expone funciones simples para registrar
+# eventos (accesos, seguridad, errores, sistema y negocio) desde cualquier parte
+# del backend.
 #
-# CAMBIOS PARA VERCEL: el disco es de solo lectura salvo /tmp. Si la carpeta
-# configurada no se puede escribir, se usa la carpeta temporal del sistema. En
-# Vercel, además, cada línea se envía a la salida estándar para verla en el panel
-# "Logs" del proyecto (los archivos de /tmp se pierden entre invocaciones).
+# DÓNDE SE GUARDA CADA COSA:
+# - Local: archivos con rotación automática en la carpeta configurada (~/logs).
+# - Vercel: el disco no persiste ni se comparte entre instancias, por eso
+#   seguridad, errores, sistema y negocio se guardan en la base de datos
+#   (tabla registros_log, se conservan 30 días) y además salen por la consola.
+#   Los accesos (uno por petición) solo salen por la consola de Vercel.
 
 import logging
 import os
 import sys
 import tempfile
+import threading
+import time
+from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 
 from app.config import configuracion
+from app.database import SesionLocal
+from app.models.registro_log import RegistroLog
+from app.utils.limitador import obtener_ip_cliente
+from app.utils.zona_horaria import ahora_colombia
 
-# Bloque: en Vercel los eventos también salen por consola
-_EN_VERCEL = bool(os.environ.get("VERCEL"))
+# --- Bloque: modo de almacenamiento según el entorno ---
+GUARDAR_EN_BASE_DATOS = bool(os.environ.get("VERCEL"))
+CATEGORIAS_EN_BASE_DATOS = {"seguridad", "errores", "sistema", "negocio"}
+
+# --- Bloque: límites del almacenamiento en base de datos ---
+DIAS_RETENCION_REGISTROS = 30
+PURGA_CADA_N_REGISTROS = 200
+MAXIMO_CARACTERES_MENSAJE = 1000
+SEGUNDOS_SIN_REPETIR_SEGURIDAD = 30  # Un mismo evento de seguridad no se repite dentro de esta ventana
+SEGUNDOS_PAUSA_SI_BASE_FALLA = 60  # Si la base falla, no se reintenta de inmediato (evita bloqueos)
 
 
 def _resolver_carpeta_logs() -> str:
@@ -36,7 +53,7 @@ def _resolver_carpeta_logs() -> str:
     return candidatas[-1]
 
 
-# --- Carpeta física donde se guardan los archivos de log ---
+# --- Carpeta física de los archivos de log (solo se usa fuera de Vercel) ---
 CARPETA_LOGS = _resolver_carpeta_logs()
 
 # --- Nombres de archivo permitidos (también usado por el router para evitar path traversal) ---
@@ -54,34 +71,114 @@ _FORMATO = logging.Formatter(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# --- Caché de loggers ya construidos, para no crear manejadores duplicados ---
+# --- Estado interno compartido por los manejadores de base de datos ---
 _loggers: dict[str, logging.Logger] = {}
+_candado_estado = threading.Lock()
+_ultimos_mensajes: dict[tuple[str, str], float] = {}
+_registros_desde_purga = 0
+_base_pausada_hasta = 0.0
+
+
+def _es_repetido(categoria: str, mensaje: str) -> bool:
+    """True si el mismo mensaje ya se guardó hace menos de SEGUNDOS_SIN_REPETIR_SEGURIDAD."""
+    ahora = time.monotonic()
+    with _candado_estado:
+        if len(_ultimos_mensajes) > 500:
+            _ultimos_mensajes.clear()  # Evita que el diccionario crezca sin límite
+        previo = _ultimos_mensajes.get((categoria, mensaje))
+        if previo is not None and ahora - previo < SEGUNDOS_SIN_REPETIR_SEGURIDAD:
+            return True
+        _ultimos_mensajes[(categoria, mensaje)] = ahora
+        return False
+
+
+def _purgar_registros_antiguos(db) -> None:
+    """Cada cierto número de inserciones borra los registros más viejos que la retención."""
+    global _registros_desde_purga
+    with _candado_estado:
+        _registros_desde_purga += 1
+        if _registros_desde_purga < PURGA_CADA_N_REGISTROS:
+            return
+        _registros_desde_purga = 0
+
+    limite = ahora_colombia() - timedelta(days=DIAS_RETENCION_REGISTROS)
+    db.query(RegistroLog).filter(RegistroLog.fecha < limite).delete(synchronize_session=False)
+    db.commit()
+
+
+class ManejadorBaseDatos(logging.Handler):
+    """Manejador de logging que guarda cada evento como una fila de registros_log."""
+
+    def __init__(self, categoria: str, deduplicar: bool = False):
+        super().__init__()
+        self.categoria = categoria
+        self.deduplicar = deduplicar
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Guarda el evento. Un fallo de la base nunca debe romper la petición que lo originó."""
+        global _base_pausada_hasta
+        if time.monotonic() < _base_pausada_hasta:
+            return  # La base falló hace poco: el evento igual queda en la consola
+
+        try:
+            mensaje = record.getMessage()[:MAXIMO_CARACTERES_MENSAJE]
+            if self.deduplicar and _es_repetido(self.categoria, mensaje):
+                return
+
+            db = SesionLocal()
+            try:
+                db.add(
+                    RegistroLog(
+                        categoria=self.categoria,
+                        fecha=ahora_colombia(),
+                        nivel=record.levelname,
+                        mensaje=mensaje,
+                    )
+                )
+                db.commit()
+                _purgar_registros_antiguos(db)
+            finally:
+                db.close()
+        except Exception:
+            _base_pausada_hasta = time.monotonic() + SEGUNDOS_PAUSA_SI_BASE_FALLA
+            self.handleError(record)
+
+
+def _agregar_consola(logger: logging.Logger, categoria: str) -> None:
+    """Envía el evento también a la salida estándar (visible en Vercel > Logs)."""
+    consola = logging.StreamHandler(sys.stdout)
+    consola.setFormatter(logging.Formatter(f"[{categoria}] %(asctime)s | %(levelname)s | %(message)s"))
+    logger.addHandler(consola)
 
 
 def _construir_logger(categoria: str) -> logging.Logger:
-    """Crea (una sola vez) un logger con rotación de archivo para una categoría."""
+    """Crea (una sola vez) el logger de una categoría con los manejadores del entorno."""
     logger = logging.getLogger(f"monitoreo.{categoria}")
     logger.setLevel(configuracion.NIVEL_LOG)
     logger.propagate = False  # Evita que el mensaje también salga por la consola de uvicorn
 
-    if not logger.handlers:
-        try:
-            manejador = RotatingFileHandler(
-                os.path.join(CARPETA_LOGS, ARCHIVOS_LOG[categoria]),
-                maxBytes=configuracion.LOG_MAX_BYTES,
-                backupCount=configuracion.LOG_BACKUP_COUNT,
-                encoding="utf-8",
-            )
-            manejador.setFormatter(_FORMATO)
-            logger.addHandler(manejador)
-        except OSError:
-            pass  # Sin disco escribible, queda solo la salida estándar
+    if logger.handlers:
+        return logger
 
-        if _EN_VERCEL or not logger.handlers:
-            consola = logging.StreamHandler(sys.stdout)
-            consola.setFormatter(logging.Formatter(f"[{categoria}] %(asctime)s | %(levelname)s | %(message)s"))
-            logger.addHandler(consola)
+    if GUARDAR_EN_BASE_DATOS:
+        # Vercel: base de datos (si la categoría lo admite) y consola
+        if categoria in CATEGORIAS_EN_BASE_DATOS:
+            logger.addHandler(ManejadorBaseDatos(categoria, deduplicar=(categoria == "seguridad")))
+        _agregar_consola(logger, categoria)
+        return logger
 
+    # Local: archivo con rotación; si no se puede escribir, queda solo la consola
+    try:
+        manejador = RotatingFileHandler(
+            os.path.join(CARPETA_LOGS, ARCHIVOS_LOG[categoria]),
+            maxBytes=configuracion.LOG_MAX_BYTES,
+            backupCount=configuracion.LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        manejador.setFormatter(_FORMATO)
+        logger.addHandler(manejador)
+    except OSError:
+        _agregar_consola(logger, categoria)
     return logger
 
 
@@ -93,9 +190,9 @@ def configurar_logging() -> None:
 
 def _sanear(texto) -> str:
     """
-    Elimina saltos de línea y retornos de carro antes de escribir el mensaje.
+    Elimina saltos de línea y retornos de carro antes de registrar el mensaje.
     Previene "inyección de logs": un dato controlado por el usuario no puede
-    falsificar una línea completa del archivo.
+    falsificar una línea completa del registro.
     """
     if texto is None:
         return ""
@@ -110,13 +207,10 @@ def _obtener(categoria: str) -> logging.Logger:
 
 
 def _ip_cliente(request) -> str:
-    """Obtiene la IP real del cliente, considerando si hay un proxy reverso delante."""
+    """IP real del cliente (misma lógica segura que el limitador de peticiones)."""
     if request is None:
         return "no-disponible"
-    adelante = request.headers.get("x-forwarded-for")
-    if adelante:
-        return adelante.split(",")[0].strip()
-    return request.client.host if request.client else "desconocida"
+    return obtener_ip_cliente(request)
 
 
 # --- Funciones públicas de registro, usadas desde main.py, dependencies.py y routers ---

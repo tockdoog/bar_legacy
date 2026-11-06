@@ -1,24 +1,26 @@
 # Ruta: backend/app/utils/generador_factura.py
-# Construye los datos estructurados de la factura de una venta ya cobrada
-# (usados para imprimir una tirilla desde el navegador) y genera el archivo
-# PDF correspondiente con un diseño profesional de factura, en pesos
-# colombianos, incluyendo la DISCRIMINACIÓN DEL IMPUESTO agrupada por tipo.
-# El impuesto de cada línea ya viene CONGELADO desde el momento en que el
-# producto se agregó al carrito (ver DetalleVenta.tipo/porcentaje/etiqueta
-# _impuesto_aplicado en routers/ventas.py), por lo que esta factura nunca
-# cambia aunque más adelante se edite el impuesto del producto o la
-# configuración global: no necesita consultar la base de datos. No depende
-# de ningún nicho de negocio: solo usa los datos genéricos de la venta.
+# Construye los datos de la factura de una venta ya cobrada (para imprimir una tirilla
+# desde el navegador) y genera el PDF con la DISCRIMINACIÓN DEL IMPUESTO agrupada por
+# tipo, en pesos colombianos. El impuesto de cada línea ya viene CONGELADO desde que el
+# producto se agregó al carrito (ver DetalleVenta), por lo que la factura nunca cambia
+# aunque después se edite el impuesto del producto o la configuración global.
+#
+# CORRECCIONES:
+# - Los textos del negocio y de los productos se escapan antes de entrar a ReportLab:
+#   un "&" o un "<" (ej. "Pizza & Pasta") rompía la generación del PDF con un error 500.
+# - Los nombres largos de producto se ajustan en varias líneas en vez de salirse de la hoja.
+# - Fecha de respaldo con ahora_colombia() (antes datetime.utcnow(), hora UTC).
 
 from collections import OrderedDict
 from datetime import datetime
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate,
     Table,
@@ -30,6 +32,7 @@ from reportlab.platypus import (
 
 from app.config import configuracion
 from app.models.venta import Venta, ETIQUETAS_METODO_PAGO
+from app.utils.zona_horaria import ahora_colombia
 
 PROVEEDOR_NOMBRE = "SoftLegacy"
 PROVEEDOR_SITIO_WEB = "https://softlegacy.vercel.app"
@@ -49,18 +52,13 @@ def _formatear_cop(valor: float | None) -> str:
 
 def _calcular_discriminacion_impuesto(venta: Venta) -> list[dict]:
     """
-    Agrupa las líneas de la venta por el impuesto que tenían CONGELADO al
-    momento de agregarse al carrito (etiqueta + porcentaje), y calcula la
-    base gravable y el valor del impuesto de cada grupo:
+    Agrupa las líneas por el impuesto CONGELADO al agregarse al carrito (etiqueta +
+    porcentaje) y calcula la base gravable y el valor del impuesto de cada grupo:
 
-        base_gravable = subtotal_grupo / (1 + porcentaje/100)
+        base_gravable  = subtotal_grupo / (1 + porcentaje/100)
         valor_impuesto = subtotal_grupo - base_gravable
 
-    Devuelve una lista de grupos (uno por combinación etiqueta+porcentaje
-    distinta), en el orden en que aparecieron. Líneas de ventas creadas
-    ANTES de este campo (porcentaje_impuesto_aplicado es None) se agrupan
-    como "Sin impuesto" para no inventar un impuesto que no se congeló en
-    su momento.
+    Las líneas anteriores a este campo (porcentaje None) se agrupan como "Sin impuesto".
     """
     grupos: "OrderedDict[tuple[str, float], dict]" = OrderedDict()
 
@@ -100,11 +98,8 @@ def _calcular_discriminacion_impuesto(venta: Venta) -> list[dict]:
 
 def construir_datos_factura(venta: Venta) -> dict:
     """
-    Construye un diccionario con toda la información necesaria para mostrar
-    o imprimir la factura de una venta ya cobrada: datos del negocio, de la
-    transacción, los productos, los totales, la discriminación del impuesto
-    (agrupada por tipo, ya que distintos productos pueden tener impuestos
-    distintos), el método de pago y los datos del proveedor del sistema.
+    Arma el diccionario con toda la información de la factura: datos del negocio, de la
+    transacción, productos, totales, discriminación del impuesto, método de pago y proveedor.
     """
     items = [
         {
@@ -120,8 +115,6 @@ def construir_datos_factura(venta: Venta) -> dict:
         ETIQUETAS_METODO_PAGO.get(venta.metodo_pago, "—") if venta.metodo_pago else "—"
     )
 
-    grupos_impuesto = _calcular_discriminacion_impuesto(venta)
-
     return {
         "negocio": {
             "nombre": configuracion.NOMBRE_NEGOCIO,
@@ -131,7 +124,7 @@ def construir_datos_factura(venta: Venta) -> dict:
         },
         "venta": {
             "id": venta.id,
-            "fecha": (venta.fecha_pago or datetime.utcnow()).isoformat(),
+            "fecha": (venta.fecha_pago or ahora_colombia()).isoformat(),
             "mesa": str(venta.mesa.numero) if venta.mesa_id and venta.mesa else None,
             "vendedor": venta.usuario.nombre_completo if venta.usuario else "—",
             "estado": venta.estado.value,
@@ -144,7 +137,7 @@ def construir_datos_factura(venta: Venta) -> dict:
             "cambio": venta.cambio,
             "metodo_pago": metodo_pago_texto,
         },
-        "grupos_impuesto": grupos_impuesto,
+        "grupos_impuesto": _calcular_discriminacion_impuesto(venta),
         "proveedor": {
             "nombre": PROVEEDOR_NOMBRE,
             "sitio_web": PROVEEDOR_SITIO_WEB,
@@ -154,12 +147,9 @@ def construir_datos_factura(venta: Venta) -> dict:
 
 def generar_pdf_factura(datos: dict) -> BytesIO:
     """
-    Genera el archivo PDF de la factura a partir del diccionario devuelto
-    por construir_datos_factura(), con un diseño profesional: encabezado con
-    los datos del negocio, detalle de productos, discriminación del
-    impuesto (una fila por cada tipo de impuesto distinto involucrado en la
-    venta), totales, método de pago y pie de página con los datos del
-    proveedor del sistema (SoftLegacy).
+    Genera el PDF de la factura a partir de construir_datos_factura(): encabezado del
+    negocio, detalle de productos, discriminación del impuesto (una fila por tipo),
+    totales, método de pago y pie de página con los datos del proveedor del sistema.
     """
     buffer = BytesIO()
     documento = SimpleDocTemplate(
@@ -173,6 +163,7 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
     estilos = getSampleStyleSheet()
     elementos = []
 
+    # --- Estilos de texto ---
     estilo_titulo_negocio = ParagraphStyle(
         "TituloNegocio", parent=estilos["Title"], alignment=TA_CENTER, textColor=COLOR_NEGRO,
     )
@@ -183,6 +174,7 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
     estilo_pie = ParagraphStyle(
         "Pie", parent=estilos["Normal"], alignment=TA_CENTER, fontSize=8, textColor=colors.grey,
     )
+    estilo_celda = ParagraphStyle("Celda", parent=estilos["Normal"], fontSize=9, leading=11)
 
     negocio = datos["negocio"]
     venta = datos["venta"]
@@ -190,30 +182,33 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
     grupos_impuesto = datos["grupos_impuesto"]
     proveedor = datos["proveedor"]
 
-    elementos.append(Paragraph(negocio["nombre"], estilo_titulo_negocio))
+    # --- Bloque: encabezado con los datos del negocio (textos escapados) ---
+    elementos.append(Paragraph(escape(negocio["nombre"]), estilo_titulo_negocio))
     datos_contacto = " · ".join(
         texto for texto in [negocio.get("nit"), negocio.get("direccion"), negocio.get("telefono")] if texto
     )
     if datos_contacto:
-        elementos.append(Paragraph(datos_contacto, estilo_subtitulo))
+        elementos.append(Paragraph(escape(datos_contacto), estilo_subtitulo))
     elementos.append(Spacer(1, 0.4 * cm))
     elementos.append(HRFlowable(width="100%", color=COLOR_DORADO, thickness=1.2))
     elementos.append(Spacer(1, 0.4 * cm))
 
+    # --- Bloque: datos de la venta ---
     fecha_legible = datetime.fromisoformat(venta["fecha"]).strftime("%d/%m/%Y %H:%M")
     elementos.append(Paragraph(f"<b>Factura de venta #{venta['id']}</b>", estilos["Heading2"]))
     elementos.append(Paragraph(f"Fecha y hora: {fecha_legible}", estilos["Normal"]))
     if venta.get("mesa"):
-        elementos.append(Paragraph(f"Mesa: {venta['mesa']}", estilos["Normal"]))
-    elementos.append(Paragraph(f"Atendido por: {venta['vendedor']}", estilos["Normal"]))
+        elementos.append(Paragraph(f"Mesa: {escape(venta['mesa'])}", estilos["Normal"]))
+    elementos.append(Paragraph(f"Atendido por: {escape(venta['vendedor'])}", estilos["Normal"]))
     if venta.get("estado") == "anulada":
         elementos.append(Paragraph("<b>Esta venta fue ANULADA posteriormente.</b>", estilos["Normal"]))
     elementos.append(Spacer(1, 0.5 * cm))
 
+    # --- Bloque: tabla de productos (el nombre se ajusta en varias líneas si es largo) ---
     filas = [["Producto", "Cant.", "Precio unit.", "Subtotal"]]
     for item in datos["items"]:
         filas.append([
-            item["nombre"],
+            Paragraph(escape(item["nombre"]), estilo_celda),
             str(item["cantidad"]),
             _formatear_cop(item["precio_unitario"]),
             _formatear_cop(item["subtotal"]),
@@ -228,6 +223,7 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, -1), 9),
                 ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F4EC")]),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
@@ -239,15 +235,16 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
     elementos.append(tabla)
     elementos.append(Spacer(1, 0.5 * cm))
 
-    # --- Bloque: discriminación del impuesto, una fila por cada tipo de
-    # impuesto distinto involucrado en la venta (ej: unos productos con IVA,
-    # otros exentos). Solo se muestran los grupos que sí tienen impuesto. ---
+    # --- Bloque: discriminación del impuesto (solo los grupos que sí tienen impuesto) ---
     filas_impuesto = []
     for grupo in grupos_impuesto:
         if grupo["aplica"]:
             filas_impuesto.append(["Base gravable", _formatear_cop(grupo["base_gravable"])])
             filas_impuesto.append(
-                [f"{grupo['etiqueta']} ({grupo['porcentaje']}%)", _formatear_cop(grupo["valor_impuesto"])]
+                [
+                    Paragraph(escape(f"{grupo['etiqueta']} ({grupo['porcentaje']}%)"), estilo_celda),
+                    _formatear_cop(grupo["valor_impuesto"]),
+                ]
             )
 
     if filas_impuesto:
@@ -266,6 +263,7 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
         elementos.append(tabla_impuesto)
         elementos.append(Spacer(1, 0.3 * cm))
 
+    # --- Bloque: totales y método de pago ---
     filas_totales = [
         ["Subtotal", _formatear_cop(totales["subtotal"])],
         ["TOTAL", _formatear_cop(totales["total"])],
@@ -290,11 +288,15 @@ def generar_pdf_factura(datos: dict) -> BytesIO:
     elementos.append(tabla_totales)
     elementos.append(Spacer(1, 1 * cm))
 
+    # --- Bloque: pie de página con los datos del proveedor del sistema ---
     elementos.append(HRFlowable(width="100%", color=colors.lightgrey, thickness=0.7))
     elementos.append(Spacer(1, 0.3 * cm))
     elementos.append(Paragraph("¡Gracias por su compra!", estilo_pie))
     elementos.append(
-        Paragraph(f"Sistema desarrollado por {proveedor['nombre']} · {proveedor['sitio_web']}", estilo_pie)
+        Paragraph(
+            f"Sistema desarrollado por {escape(proveedor['nombre'])} · {escape(proveedor['sitio_web'])}",
+            estilo_pie,
+        )
     )
 
     documento.build(elementos)

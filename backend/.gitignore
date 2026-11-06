@@ -1,10 +1,21 @@
 # Ruta: backend/.gitignore
 # Evita que archivos sensibles o generados localmente se suban al control de versiones.
 
+# Secretos: .env nunca se sube, pero la plantilla .env.example sí
 .env
+.env.*
+!.env.example
+
+# Bases de datos locales
 *.db
+*.sqlite3
+
+# Archivos generados
 __pycache__/
 *.pyc
+.pytest_cache/
 .venv/
 venv/
 uploads/
+logs/
+.vercel/

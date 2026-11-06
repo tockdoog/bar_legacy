@@ -2,6 +2,10 @@
 // Selector de imagen del producto: vista previa, validación de tipo (JPG, PNG o
 // WEBP), optimización automática en el navegador (ver utils/imagen.js) y opción
 // de quitarla. Acepta originales de hasta 15 MB porque se reducen antes de subir.
+//
+// CORRECCIÓN: después de optimizar se verifica que la imagen pese 4 MB o menos.
+// Es el límite del backend (TAMANO_MAXIMO_IMAGEN_BYTES) y de Vercel, que rechaza
+// peticiones de más de 4,5 MB sin un mensaje legible.
 
 import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, Package, Trash2 } from 'lucide-react';
@@ -12,6 +16,7 @@ import { comprimirImagen } from '../../utils/imagen.js';
 
 const TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp'];
 const TAMANO_MAXIMO_ORIGINAL = 15 * 1024 * 1024;
+const TAMANO_MAXIMO_SUBIDA = 4 * 1024 * 1024; // Mismo límite que el backend
 
 export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccionar, onQuitar, deshabilitado }) {
   const entrada = useRef(null);
@@ -31,7 +36,7 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
 
   const mostrada = vistaPrevia || (!quitada ? urlImagen(imagenActual) : null);
 
-  // Bloque: valida el archivo, lo optimiza y lo entrega al formulario
+  // Bloque: valida el archivo, lo optimiza, confirma que cabe en el límite y lo entrega al formulario
   async function alElegir(evento) {
     const elegido = evento.target.files?.[0];
     evento.target.value = '';
@@ -46,7 +51,12 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
     }
     setProcesando(true);
     try {
-      onSeleccionar(await comprimirImagen(elegido));
+      const optimizada = await comprimirImagen(elegido);
+      if (optimizada.size > TAMANO_MAXIMO_SUBIDA) {
+        toast.error('La imagen sigue pesando más de 4 MB después de optimizarla. Prueba con otra.');
+        return;
+      }
+      onSeleccionar(optimizada);
     } catch {
       toast.error('No se pudo procesar la imagen. Prueba con otra.');
     } finally {
@@ -72,7 +82,7 @@ export default function CampoImagen({ imagenActual, archivo, quitada, onSeleccio
             <Trash2 size={16} aria-hidden="true" /> Quitar
           </button>
         )}
-        <small className="campo-ayuda">JPG, PNG o WEBP. Se optimiza automáticamente antes de subirla.</small>
+        <small className="campo-ayuda">JPG, PNG o WEBP. Se optimiza automáticamente antes de subirla (máximo 4 MB).</small>
       </div>
     </div>
   );

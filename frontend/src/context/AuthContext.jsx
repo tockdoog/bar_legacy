@@ -5,6 +5,10 @@
 //
 // SEGURIDAD: ocultar botones según rol/permiso es solo comodidad visual; el
 // backend sigue siendo quien valida cada petición.
+//
+// CAMBIO: tienePermiso ahora es estable (useCallback) y solo cambia si cambian el
+// rol o los permisos. Antes cambiaba en cada actualización de la sesión y las
+// pantallas que dependen de él (como /test) repetían sus consultas al servidor.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -112,21 +116,29 @@ export function AuthProvider({ children }) {
     setSesion(nueva);
   }, []);
 
-  // Bloque: valor expuesto; el administrador tiene todos los permisos por su rol
-  const valor = useMemo(() => {
-    const esAdmin = sesion?.rol === 'administrador';
-    return {
+  // Bloque: helper de permisos estable. El administrador tiene todos por su rol.
+  const rol = sesion?.rol;
+  const permisosTexto = (sesion?.permisos || []).join(',');
+  const tienePermiso = useCallback(
+    (clave) => rol === 'administrador' || permisosTexto.split(',').includes(clave),
+    [rol, permisosTexto]
+  );
+
+  // Bloque: valor expuesto a toda la aplicación
+  const valor = useMemo(
+    () => ({
       usuario: sesion
         ? { rol: sesion.rol, nombre_completo: sesion.nombre_completo, permisos: sesion.permisos }
         : null,
       autenticado: Boolean(sesion?.token),
       cargando,
-      esAdmin,
-      tienePermiso: (clave) => esAdmin || (sesion?.permisos || []).includes(clave),
+      esAdmin: rol === 'administrador',
+      tienePermiso,
       iniciarSesion,
       cerrarSesion: () => cerrarSesion('Sesión cerrada correctamente.'),
-    };
-  }, [sesion, cargando, iniciarSesion, cerrarSesion]);
+    }),
+    [sesion, rol, cargando, tienePermiso, iniciarSesion, cerrarSesion]
+  );
 
   return <ContextoAuth.Provider value={valor}>{children}</ContextoAuth.Provider>;
 }

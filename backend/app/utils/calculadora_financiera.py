@@ -1,11 +1,12 @@
 # Ruta: backend/app/utils/calculadora_financiera.py
-# Motor de calculo financiero puro (sin dependencias de base de datos salvo
-# los tipos ConfiguracionFinanciera y Producto): calcula el precio de venta
-# recomendado segun costo, margen de utilidad deseado e impuesto configurado,
-# evalua el estado de rentabilidad de productos ya existentes, y resuelve
-# cual configuracion de impuesto/margen aplica a un producto puntual (la
-# global del negocio, o la propia del producto si la tiene activada). No
-# depende de ningun rubro de negocio especifico.
+# Motor de cálculo financiero (sin dependencias de base de datos salvo los tipos
+# ConfiguracionFinanciera y Producto): calcula el precio de venta recomendado según
+# costo, margen de utilidad e impuesto, evalúa la rentabilidad de productos
+# existentes y resuelve qué configuración de impuesto/margen aplica a un producto
+# (la global del negocio o la propia del producto si la tiene activada).
+#
+# CORRECCIÓN: un margen de 100 % o más hacía dividir por cero (o dar un precio
+# negativo). Ahora se rechaza con un ValueError que el router convierte en un 400.
 
 from dataclasses import dataclass
 
@@ -14,7 +15,7 @@ from app.models.finanzas import ConfiguracionFinanciera, TipoImpuesto, ETIQUETAS
 
 @dataclass
 class ResultadoCalculoPrecio:
-    """Estructura interna con el desglose completo de un calculo de precio."""
+    """Desglose completo de un cálculo de precio."""
     costo_compra: float
     margen_utilidad_aplicado: float
     utilidad_por_unidad: float
@@ -28,10 +29,8 @@ class ResultadoCalculoPrecio:
 @dataclass
 class ConfiguracionEfectivaProducto:
     """
-    Configuración de impuesto y margen que realmente aplica a un producto,
-    ya resuelta: o la global del negocio, o la propia del producto si la
-    tiene activada. Se usa tanto para la calculadora/recomendaciones como
-    para congelar el impuesto en cada línea de venta al momento de cobrar.
+    Configuración de impuesto y margen que realmente aplica a un producto: la global
+    o la propia. Se usa para la calculadora y para congelar el impuesto en cada línea de venta.
     """
     tipo_impuesto: TipoImpuesto
     porcentaje_impuesto: float
@@ -42,11 +41,8 @@ class ConfiguracionEfectivaProducto:
 
 def resolver_configuracion_efectiva(producto, configuracion_global: ConfiguracionFinanciera) -> ConfiguracionEfectivaProducto:
     """
-    Determina qué impuesto y margen aplican realmente a un producto: si
-    "usar_configuracion_global" es True (o el producto no trae ese campo,
-    por compatibilidad con datos antiguos), se usa la configuración global
-    del negocio; si es False, se usa la configuración propia guardada en el
-    producto.
+    Determina qué impuesto y margen aplican a un producto: si "usar_configuracion_global"
+    es True (o el producto no trae el campo, por compatibilidad), la global; si no, la propia.
     """
     usa_global = getattr(producto, "usar_configuracion_global", True)
 
@@ -72,7 +68,11 @@ def resolver_configuracion_efectiva(producto, configuracion_global: Configuracio
         if tipo_propio == TipoImpuesto.PERSONALIZADO and producto.nombre_impuesto_propio_personalizado
         else ETIQUETAS_TIPO_IMPUESTO[tipo_propio]
     )
-    margen_propio = producto.margen_utilidad_propio or configuracion_global.margen_utilidad_deseado
+    margen_propio = (
+        producto.margen_utilidad_propio
+        if producto.margen_utilidad_propio is not None
+        else configuracion_global.margen_utilidad_deseado
+    )
 
     return ConfiguracionEfectivaProducto(
         tipo_impuesto=tipo_propio,
@@ -92,16 +92,18 @@ def calcular_precio_recomendado(
     """
     Calcula el precio de venta recomendado a partir de un costo.
 
-    El margen de utilidad deseado se interpreta como porcentaje SOBRE EL
-    PRECIO DE VENTA (formula estandar de margen bruto: margen = (precio_venta
-    - costo) / precio_venta), no como un recargo sobre el costo (markup).
-    Esto evita el error comun de confundir "margen" con "markup": un margen
-    del 30% NO equivale a sumarle 30% al costo.
+    El margen se interpreta como porcentaje SOBRE EL PRECIO DE VENTA (margen bruto =
+    (precio - costo) / precio), no como recargo sobre el costo (markup).
 
-    Ejemplo: costo = 10.000 COP, margen deseado = 30%
-        precio_venta_sin_impuesto = 10.000 / (1 - 0.30) = 14.286 COP
-        utilidad_por_unidad = 4.286 COP (el 30% exacto de 14.286)
+    Ejemplo: costo = 10.000 COP, margen = 30 %
+        precio sin impuesto = 10.000 / (1 - 0,30) = 14.286 COP
+        utilidad por unidad = 4.286 COP (el 30 % exacto de 14.286)
+
+    Lanza ValueError si el margen es negativo o de 100 % o más.
     """
+    if not 0 <= margen_utilidad_deseado < 100:
+        raise ValueError("El margen de utilidad debe ser mayor o igual a 0 y menor a 100 %.")
+
     fraccion_margen = margen_utilidad_deseado / 100
     precio_venta_sin_impuesto = round(costo_compra / (1 - fraccion_margen), 2)
     utilidad_por_unidad = round(precio_venta_sin_impuesto - costo_compra, 2)
@@ -130,10 +132,8 @@ def calcular_precio_recomendado(
 
 def calcular_margen_actual(precio_compra: float, precio_venta: float) -> float:
     """
-    Calcula el margen de utilidad actual de un producto ya existente, con la
-    misma formula (margen sobre precio de venta). Si el precio de venta es
-    0 o negativo, se devuelve -100 para representar una perdida total sin
-    dividir por cero.
+    Margen actual de un producto (sobre el precio de venta). Si el precio de venta es
+    0 o negativo devuelve -100 (pérdida total) sin dividir por cero.
     """
     if precio_venta <= 0:
         return -100.0
@@ -146,9 +146,8 @@ def evaluar_estado_producto(
     margen_minimo_saludable: float,
 ) -> tuple[str, str]:
     """
-    Evalua el estado de rentabilidad de un producto y devuelve una tupla
-    (estado, mensaje) lista para mostrar como advertencia al administrador.
-    Estados posibles: "perdida", "bajo_margen", "saludable".
+    Evalúa la rentabilidad de un producto y devuelve (estado, mensaje) para mostrar al
+    administrador. Estados: "perdida", "bajo_margen", "saludable".
     """
     if precio_venta < precio_compra:
         diferencia = round(precio_compra - precio_venta, 2)

@@ -1,27 +1,18 @@
 # Ruta: backend/app/routers/ventas.py
-# Endpoints del punto de venta (POS): abrir una venta (rápida o de mesa), agregar
-# y quitar productos del carrito, cobrar (con uno o varios métodos de pago:
-# factura partida), consultar el historial de ventas cobradas/anuladas para
-# buscarlas, anular una venta que YA estaba cobrada reponiendo automáticamente
-# el inventario, y generar la factura de una venta ya cobrada en tres
-# modalidades: datos para imprimir una tirilla desde el navegador, descarga en
-# PDF, y envío del PDF por correo electrónico al cliente.
+# Endpoints del punto de venta (POS): abrir una venta (rápida o de mesa), agregar y
+# quitar productos del carrito, cobrar (uno o varios métodos de pago: factura
+# partida), consultar el historial, anular una venta ya cobrada reponiendo el
+# inventario, y generar la factura (datos para tirilla, PDF y envío por correo).
 #
-# TRAZABILIDAD DE ANULACIONES: cuando se anula una venta ya cobrada, además de
-# quedar registrado en la propia venta (motivo, quién y cuándo, consultable
-# desde "Ventas cobradas" en el POS), se registra en logs/negocio.log un
-# resumen legible con los PRODUCTOS anulados (no solo el total), para que el
-# panel de Monitoreo (logs.html) muestre exactamente qué se anuló. Los
-# reportes (reportes.html) también pueden listar estas anulaciones porque los
-# detalles de productos NUNCA se borran al anular: solo cambia venta.estado.
+# CONCURRENCIA (PostgreSQL/Neon): las operaciones que cambian inventario o estado
+# bloquean primero la fila de la venta y de los productos (SELECT ... FOR UPDATE).
+# Así, dos cajeros que cobran o anulan la misma venta al mismo tiempo no duplican
+# el descuento de stock. En SQLite (local) FOR UPDATE se ignora sin problema.
 #
-# ZONA HORARIA: fecha_pago y fecha_anulacion se guardan con ahora_colombia()
-# (hora local de Colombia, "naive"), NUNCA con datetime.now(timezone.utc).
-# Ver app/utils/zona_horaria.py para el detalle de por qué: SQLite no
-# conserva tzinfo, y mezclar UTC (al guardar) con hora del servidor (al
-# filtrar reportes) hacía que una venta apareciera fechada un día después.
-
-from datetime import datetime
+# TRAZABILIDAD: las anulaciones quedan en la propia venta y en el log de negocio con
+# los productos anulados (los detalles nunca se borran: solo cambia venta.estado).
+#
+# ZONA HORARIA: fecha_pago y fecha_anulacion usan ahora_colombia() (ver zona_horaria.py).
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -29,7 +20,7 @@ from sqlalchemy import or_, cast, String as TipoString
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import obtener_db
-from app.dependencies import requerir_rol, requerir_permiso, obtener_usuario_actual
+from app.dependencies import requerir_rol, requerir_permiso
 from app.logs.logger import registrar_negocio
 from app.models.mesa import Mesa, EstadoMesa
 from app.models.producto import Producto
@@ -48,28 +39,33 @@ from app.schemas.venta import (
     PagoDetalleRespuesta,
     FacturaEnviarCorreo,
 )
-
-from app.models.finanzas import ConfiguracionFinanciera, TipoImpuesto
 from app.utils.calculadora_financiera import resolver_configuracion_efectiva
-from app.utils.zona_horaria import ahora_colombia
-
-from app.utils.generador_factura import construir_datos_factura, generar_pdf_factura
+from app.utils.configuracion_financiera import obtener_configuracion_financiera
 from app.utils.envio_correo import enviar_factura_por_correo, ErrorEnvioCorreo
+from app.utils.generador_factura import construir_datos_factura, generar_pdf_factura
 from app.utils.limitador import limitador
+from app.utils.zona_horaria import ahora_colombia
 
 router = APIRouter(prefix="/api/ventas", tags=["Punto de venta"])
 
-# Roles que pueden operar el punto de venta, incluyendo cobrar, anular ventas
-# y generar/enviar facturas.
+# Roles que pueden operar el punto de venta (cobrar, anular, facturar)
 _ROLES_POS = (RolUsuario.ADMINISTRADOR, RolUsuario.EMPLEADO)
 
-# Margen de tolerancia para comparar montos en punto flotante (evita rechazar
-# un pago por diferencias de centavos por redondeo, ej. 19999.999999999996)
+# Tolerancia para comparar montos en punto flotante (evita rechazar por diferencias de centavos)
 _TOLERANCIA_CENTAVOS = 0.01
 
 
+# =============================================================================
+# FUNCIONES AUXILIARES
+# =============================================================================
+
+def _formatear_pesos(valor: float) -> str:
+    """Formatea un monto como pesos colombianos (punto de miles), ej. $ 12.500."""
+    return "$" + f"{valor:,.0f}".replace(",", ".")
+
+
 def _construir_respuesta(venta: Venta) -> VentaRespuesta:
-    """Convierte una venta y sus detalles/pagos en el esquema de respuesta para el frontend."""
+    """Convierte una venta con sus detalles y pagos en el esquema de respuesta del frontend."""
     detalles_respuesta = [
         DetalleVentaRespuesta(
             id=detalle.id,
@@ -109,7 +105,7 @@ def _construir_respuesta(venta: Venta) -> VentaRespuesta:
 
 
 def _recalcular_totales(venta: Venta) -> None:
-    """Recalcula el subtotal y total de la venta sumando el subtotal de cada producto del carrito."""
+    """Recalcula subtotal y total sumando el subtotal de cada producto del carrito."""
     venta.subtotal = round(sum(detalle.subtotal for detalle in venta.detalles), 2)
     venta.total = venta.subtotal
 
@@ -125,8 +121,44 @@ def _consulta_venta_completa(db: Session):
     )
 
 
+def _bloquear_venta(db: Session, venta_id: int) -> None:
+    """
+    Bloquea la fila de la venta hasta terminar la transacción. Si otra petición la
+    tiene bloqueada, esta espera. Se hace en una consulta simple, sin uniones, porque
+    PostgreSQL no permite FOR UPDATE sobre el lado nulo de un LEFT JOIN.
+    """
+    db.query(Venta.id).filter(Venta.id == venta_id).with_for_update().first()
+
+
+def _bloquear_productos(db: Session, producto_ids) -> dict[int, Producto]:
+    """
+    Bloquea los productos indicados (siempre en orden de id, para evitar bloqueos
+    cruzados entre dos cobros) y los devuelve en un diccionario por id.
+    """
+    ids = sorted(set(producto_ids))
+    if not ids:
+        return {}
+    productos = (
+        db.query(Producto)
+        .filter(Producto.id.in_(ids))
+        .order_by(Producto.id)
+        .with_for_update()
+        .all()
+    )
+    return {producto.id: producto for producto in productos}
+
+
+def _cantidades_por_producto(venta: Venta) -> dict[int, int]:
+    """Suma las cantidades por producto (un mismo producto puede estar normal y en promoción)."""
+    cantidades: dict[int, int] = {}
+    for detalle in venta.detalles:
+        cantidades[detalle.producto_id] = cantidades.get(detalle.producto_id, 0) + detalle.cantidad
+    return cantidades
+
+
 def _obtener_venta_abierta_o_error(venta_id: int, db: Session) -> Venta:
-    """Busca una venta por id, exigiendo que exista y siga abierta (no pagada, ni anulada, ni cancelada)."""
+    """Busca la venta (bloqueándola) y exige que siga abierta."""
+    _bloquear_venta(db, venta_id)
     venta = _consulta_venta_completa(db).filter(Venta.id == venta_id).first()
     if not venta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Venta no encontrada")
@@ -136,7 +168,8 @@ def _obtener_venta_abierta_o_error(venta_id: int, db: Session) -> Venta:
 
 
 def _obtener_venta_pagada_o_error(venta_id: int, db: Session) -> Venta:
-    """Busca una venta por id, exigiendo que esté en estado PAGADA (única que se puede anular)."""
+    """Busca la venta (bloqueándola) y exige que esté PAGADA (única que se puede anular)."""
+    _bloquear_venta(db, venta_id)
     venta = _consulta_venta_completa(db).filter(Venta.id == venta_id).first()
     if not venta:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Venta no encontrada")
@@ -150,11 +183,9 @@ def _obtener_venta_pagada_o_error(venta_id: int, db: Session) -> Venta:
 
 def _obtener_venta_facturable_o_error(venta_id: int, db: Session) -> Venta:
     """
-    Busca una venta por id, exigiendo que ya haya sido cobrada (tiene fecha
-    de pago registrada). Se permite facturar tanto ventas PAGADAS como
-    ANULADAS (para que el cliente conserve un comprobante de lo ocurrido),
-    pero nunca una venta que sigue como carrito abierto o que se canceló
-    antes de cobrarse.
+    Busca una venta ya cobrada (con fecha de pago). Se factura tanto una venta PAGADA
+    como una ANULADA (el cliente conserva un comprobante), nunca un carrito abierto
+    ni uno cancelado antes de cobrarse.
     """
     venta = _consulta_venta_completa(db).filter(Venta.id == venta_id).first()
     if not venta:
@@ -166,6 +197,10 @@ def _obtener_venta_facturable_o_error(venta_id: int, db: Session) -> Venta:
         )
     return venta
 
+
+# =============================================================================
+# CONSULTAS
+# =============================================================================
 
 @router.get("/abiertas", response_model=list[VentaRespuesta])
 def listar_ventas_abiertas(
@@ -185,9 +220,7 @@ def listar_historial_ventas(
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Lista las ventas ya cerradas (pagadas o anuladas) más recientes, para que
-    el cajero pueda encontrar una venta reciente y anularla si el cliente se
-    arrepintió después de que la factura ya se generó. Admite buscar por
+    Lista las ventas cerradas (pagadas o anuladas) más recientes. Admite buscar por
     número de venta, número de mesa o nombre del vendedor.
     """
     consulta = _consulta_venta_completa(db).filter(
@@ -195,15 +228,16 @@ def listar_historial_ventas(
     )
 
     if busqueda:
-        texto_busqueda = f"%{busqueda.strip()}%"
+        texto = busqueda.strip()
+        # autoescape: un "%" o "_" escrito por el usuario se busca como texto, no como comodín
         consulta = (
             consulta.outerjoin(Mesa, Venta.mesa_id == Mesa.id)
             .join(Usuario, Venta.usuario_id == Usuario.id)
             .filter(
                 or_(
-                    Mesa.numero.ilike(texto_busqueda),
-                    Usuario.nombre_completo.ilike(texto_busqueda),
-                    cast(Venta.id, TipoString).ilike(texto_busqueda),
+                    Mesa.numero.icontains(texto, autoescape=True),
+                    Usuario.nombre_completo.icontains(texto, autoescape=True),
+                    cast(Venta.id, TipoString).icontains(texto, autoescape=True),
                 )
             )
         )
@@ -225,6 +259,10 @@ def obtener_venta(
     return _construir_respuesta(venta)
 
 
+# =============================================================================
+# CARRITO
+# =============================================================================
+
 @router.post("/", response_model=VentaRespuesta, status_code=status.HTTP_201_CREATED)
 def abrir_venta(
     datos: VentaCrear,
@@ -232,12 +270,12 @@ def abrir_venta(
     usuario: Usuario = Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Abre una nueva venta: si se indica mesa_id, la mesa debe estar libre y pasa a
-    'ocupada'. Si no se indica, es una venta rápida (sin mesa asociada).
+    Abre una nueva venta. Con mesa_id, la mesa debe estar libre y pasa a 'ocupada'
+    (se bloquea la fila de la mesa para que dos meseros no la abran a la vez).
+    Sin mesa_id es una venta rápida.
     """
-    mesa = None
     if datos.mesa_id is not None:
-        mesa = db.query(Mesa).filter(Mesa.id == datos.mesa_id).first()
+        mesa = db.query(Mesa).filter(Mesa.id == datos.mesa_id).with_for_update().first()
         if not mesa:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mesa no encontrada")
         if mesa.estado != EstadoMesa.LIBRE:
@@ -250,26 +288,6 @@ def abrir_venta(
     db.refresh(nueva_venta)
     return _construir_respuesta(nueva_venta)
 
-def _obtener_configuracion_financiera(db: Session) -> ConfiguracionFinanciera:
-    """
-    Devuelve la configuración financiera global (id=1), creándola con
-    valores por defecto si aún no existe. Se usa aquí solo para resolver qué
-    impuesto congelar en cada línea de venta al momento de cobrar/agregar.
-    """
-    configuracion = db.query(ConfiguracionFinanciera).filter(ConfiguracionFinanciera.id == 1).first()
-    if configuracion is None:
-        configuracion = ConfiguracionFinanciera(
-            id=1,
-            tipo_impuesto=TipoImpuesto.SIN_IMPUESTO,
-            porcentaje_impuesto=0.0,
-            margen_utilidad_deseado=30.0,
-            margen_minimo_saludable=15.0,
-        )
-        db.add(configuracion)
-        db.commit()
-        db.refresh(configuracion)
-    return configuracion
-
 
 @router.post("/{venta_id}/items", response_model=VentaRespuesta)
 def agregar_producto_a_venta(
@@ -279,25 +297,23 @@ def agregar_producto_a_venta(
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Agrega un producto al carrito de una venta abierta (o suma cantidad si
-    ya estaba). Congela en la línea qué impuesto aplica a este producto EN
-    ESTE MOMENTO (propio del producto o heredado de la configuración
-    global), para que la factura de esta venta nunca cambie si más adelante
-    se edita el impuesto del producto o la configuración global.
+    Agrega un producto al carrito (o suma cantidad si ya estaba). Congela en la línea
+    el impuesto que aplica en este momento, para que la factura nunca cambie después.
     """
+    configuracion_global = obtener_configuracion_financiera(db)
     venta = _obtener_venta_abierta_o_error(venta_id, db)
 
     producto = db.query(Producto).filter(Producto.id == datos.producto_id, Producto.activo.is_(True)).first()
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
 
-    detalle_existente = next((d for d in venta.detalles if d.producto_id == producto.id), None)
+    detalle_existente = next(
+        (d for d in venta.detalles if d.producto_id == producto.id and d.promocion_id is None), None
+    )
     if detalle_existente:
         detalle_existente.cantidad += datos.cantidad
     else:
-        configuracion_global = _obtener_configuracion_financiera(db)
         config_efectiva = resolver_configuracion_efectiva(producto, configuracion_global)
-
         nuevo_detalle = DetalleVenta(
             venta_id=venta.id,
             producto_id=producto.id,
@@ -325,12 +341,10 @@ def agregar_promocion_a_venta(
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Agrega una promoción (combo de productos) al carrito de una venta
-    abierta. El precio especial de la promoción se reparte proporcionalmente
-    entre sus productos componentes, y cada uno congela SU PROPIO impuesto
-    (propio del producto, o heredado de la configuración global) al momento
-    de agregarse, igual que un producto individual.
+    Agrega una promoción (combo) al carrito. El precio especial se reparte
+    proporcionalmente entre sus productos, y cada uno congela su propio impuesto.
     """
+    configuracion_global = obtener_configuracion_financiera(db)
     venta = _obtener_venta_abierta_o_error(venta_id, db)
 
     promocion = (
@@ -342,7 +356,6 @@ def agregar_promocion_a_venta(
     if not promocion:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Promoción no encontrada o inactiva")
 
-    configuracion_global = _obtener_configuracion_financiera(db)
     valor_normal_total = sum(c.cantidad * c.producto.precio_venta for c in promocion.componentes)
     factor_descuento = (promocion.precio_promocional / valor_normal_total) if valor_normal_total > 0 else 1
 
@@ -376,6 +389,7 @@ def agregar_promocion_a_venta(
     db.commit()
     db.refresh(venta)
     return _construir_respuesta(venta)
+
 
 @router.put("/{venta_id}/items/{detalle_id}", response_model=VentaRespuesta)
 def actualizar_cantidad_item(
@@ -440,6 +454,10 @@ def marcar_mesa_pendiente_pago(
     return _construir_respuesta(venta)
 
 
+# =============================================================================
+# COBRO, ANULACIÓN Y CANCELACIÓN
+# =============================================================================
+
 @router.post("/{venta_id}/pagar", response_model=VentaRespuesta)
 def pagar_venta(
     venta_id: int,
@@ -448,15 +466,10 @@ def pagar_venta(
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Cobra una venta abierta: valida que el carrito no esté vacío y que la
-    suma de todos los pagos recibidos (uno o varios métodos, para soportar
-    factura partida) alcance el total. Descuenta el inventario de cada
-    producto, calcula el cambio y guarda un registro por cada método de pago
-    usado en la tabla pagos_venta. Si se usó un solo método, Venta.metodo_pago
-    queda con ese método; si se usaron dos o más, queda como MIXTO (la mezcla
-    exacta se consulta en el desglose "pagos" de la respuesta). Tras cobrarse,
-    el frontend puede llamar a los endpoints de facturación de más abajo para
-    imprimir una tirilla, descargar el PDF o enviarlo por correo.
+    Cobra una venta abierta: valida que el carrito no esté vacío y que la suma de
+    los pagos (uno o varios métodos) alcance el total. Descuenta el inventario,
+    calcula el cambio y guarda un registro por cada método usado. Con un solo método,
+    Venta.metodo_pago queda con ese método; con dos o más, queda como MIXTO.
     """
     venta = _obtener_venta_abierta_o_error(venta_id, db)
 
@@ -466,40 +479,37 @@ def pagar_venta(
     _recalcular_totales(venta)
 
     monto_total_pagado = round(sum(pago.monto for pago in datos.pagos), 2)
-
     if monto_total_pagado + _TOLERANCIA_CENTAVOS < venta.total:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La suma de los pagos es menor al total de la venta",
         )
 
-    for detalle in venta.detalles:
-        producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-        if not producto or producto.stock_actual < detalle.cantidad:
+    # Bloque: valida el stock con la cantidad TOTAL por producto (ya con los productos bloqueados)
+    cantidades = _cantidades_por_producto(venta)
+    productos = _bloquear_productos(db, cantidades)
+    for producto_id, cantidad in cantidades.items():
+        producto = productos.get(producto_id)
+        if producto is None or producto.stock_actual < cantidad:
+            nombre = producto.nombre if producto else f"#{producto_id}"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Stock insuficiente para '{detalle.producto.nombre}'",
+                detail=f"Stock insuficiente para '{nombre}'",
             )
 
-    for detalle in venta.detalles:
-        producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-        producto.stock_actual -= detalle.cantidad
+    # Bloque: descuenta el inventario
+    for producto_id, cantidad in cantidades.items():
+        productos[producto_id].stock_actual -= cantidad
 
-    # Guarda un registro de pago por cada método recibido (factura partida
-    # cuando hay más de uno). Se limpian pagos previos por seguridad, aunque
-    # en la práctica una venta ABIERTA nunca debería tener pagos todavía.
+    # Bloque: un registro de pago por cada método recibido (factura partida si hay más de uno)
     venta.pagos.clear()
     for pago in datos.pagos:
         venta.pagos.append(PagoVentaDetalle(metodo_pago=pago.metodo_pago, monto=round(pago.monto, 2)))
 
-    # "metodo_pago" queda como resumen: el único método si solo hubo uno, o
-    # MIXTO si la venta se cobró con una factura partida (dos o más métodos)
     venta.metodo_pago = datos.pagos[0].metodo_pago if len(datos.pagos) == 1 else MetodoPago.MIXTO
-
     venta.monto_pagado = monto_total_pagado
     venta.cambio = round(max(monto_total_pagado - venta.total, 0), 2)
     venta.estado = EstadoVenta.PAGADA
-    # Hora LOCAL de Colombia (naive), no UTC. Ver zona_horaria.py.
     venta.fecha_pago = ahora_colombia()
 
     if venta.mesa_id:
@@ -521,40 +531,29 @@ def anular_venta_pagada(
     usuario: Usuario = Depends(requerir_permiso("ventas_anular")),
 ):
     """
-    Anula una venta que YA estaba cobrada (ej: el cliente pidió algo y luego
-    cambió de opinión después de que la factura se generó). A diferencia de
-    cancelar_venta (que es solo para carritos abiertos sin cobrar), esta
-    operación:
-      1. Repone automáticamente el stock de cada producto de la venta.
-      2. Cambia el estado a ANULADA (no se borra el registro ni sus
-         productos: quedan visibles en el historial del POS, en los reportes
-         y en los logs para trazabilidad completa).
-      3. Guarda quién la anuló (usuario autenticado), cuándo, y el motivo
-         obligatorio recibido en el cuerpo de la petición -tanto en la propia
-         venta como en logs/negocio.log a través de registrar_negocio(). El
-         mensaje de log incluye explícitamente la lista de productos
-         anulados (no solo el total), para que el panel de Monitoreo
-         (logs.html) muestre de un vistazo qué se anuló, cuándo, quién y por qué.
+    Anula una venta que YA estaba cobrada: repone el stock de cada producto, cambia
+    el estado a ANULADA (el registro y sus productos se conservan) y guarda quién
+    la anuló, cuándo y el motivo obligatorio, en la venta y en el log de negocio.
     """
     venta = _obtener_venta_pagada_o_error(venta_id, db)
 
-    for detalle in venta.detalles:
-        producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-        if producto:
-            producto.stock_actual += detalle.cantidad
+    cantidades = _cantidades_por_producto(venta)
+    productos = _bloquear_productos(db, cantidades)
+    for producto_id, cantidad in cantidades.items():
+        if producto_id in productos:
+            productos[producto_id].stock_actual += cantidad
 
     motivo_limpio = datos.motivo.strip()
 
     venta.estado = EstadoVenta.ANULADA
     venta.motivo_anulacion = motivo_limpio
     venta.usuario_anulacion_id = usuario.id
-    # Hora LOCAL de Colombia (naive), no UTC. Ver zona_horaria.py.
     venta.fecha_anulacion = ahora_colombia()
 
     db.commit()
     db.refresh(venta)
 
-    # Construye el listado legible de productos anulados, ej: "2x Cerveza, 1x Papas"
+    # Listado legible de productos anulados, ej: "2x Cerveza, 1x Papas"
     productos_anulados_texto = ", ".join(
         f"{detalle.cantidad}x {detalle.producto.nombre}"
         for detalle in venta.detalles
@@ -566,7 +565,7 @@ def anular_venta_pagada(
         accion=f"Anuló la venta cobrada #{venta.id} ({referencia_venta})",
         usuario=usuario.nombre_usuario,
         detalle=(
-            f"Total: ${venta.total:,.0f} | Productos anulados: {productos_anulados_texto} "
+            f"Total: {_formatear_pesos(venta.total)} | Productos anulados: {productos_anulados_texto} "
             f"| Motivo: {motivo_limpio}"
         ),
         request=request,
@@ -581,7 +580,7 @@ def cancelar_venta(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
-    """Cancela una venta abierta (carrito SIN cobrar) sin afectar el inventario y libera la mesa asociada."""
+    """Cancela una venta abierta (carrito SIN cobrar) sin afectar el inventario y libera la mesa."""
     venta = _obtener_venta_abierta_o_error(venta_id, db)
 
     venta.estado = EstadoVenta.CANCELADA
@@ -594,11 +593,9 @@ def cancelar_venta(
     db.commit()
 
 
-# =====================================================================
+# =============================================================================
 # FACTURACIÓN: tirilla (datos JSON), descarga en PDF y envío por correo
-# de la factura de una venta ya cobrada. No aplica a carritos abiertos
-# ni a ventas canceladas antes de cobrarse (ver _obtener_venta_facturable_o_error).
-# =====================================================================
+# =============================================================================
 
 @router.get("/{venta_id}/factura", tags=["Facturación"])
 def obtener_datos_factura(
@@ -606,13 +603,7 @@ def obtener_datos_factura(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
-    """
-    Devuelve los datos estructurados de la factura de una venta ya cobrada,
-    listos para que el frontend imprima una tirilla desde el navegador
-    (window.print()), incluyendo la discriminación del impuesto (agrupada
-    por tipo) ya congelada en cada línea de venta. No genera ningún archivo:
-    es solo la información.
-    """
+    """Devuelve los datos de la factura de una venta cobrada, listos para imprimir una tirilla."""
     venta = _obtener_venta_facturable_o_error(venta_id, db)
     return construir_datos_factura(venta)
 
@@ -623,21 +614,14 @@ def descargar_factura_pdf(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_rol(*_ROLES_POS)),
 ):
-    """
-    Genera y descarga la factura de una venta ya cobrada en formato PDF,
-    con el nombre del negocio, los productos, la discriminación del
-    impuesto (agrupada por tipo), el vendedor, el método de pago, el cambio
-    y los datos del proveedor del sistema (SoftLegacy).
-    """
+    """Genera y descarga la factura de una venta cobrada en formato PDF."""
     venta = _obtener_venta_facturable_o_error(venta_id, db)
-    datos = construir_datos_factura(venta)
-    archivo = generar_pdf_factura(datos)
+    archivo = generar_pdf_factura(construir_datos_factura(venta))
 
-    nombre_archivo = f"factura_{venta.id}.pdf"
     return StreamingResponse(
         archivo,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+        headers={"Content-Disposition": f'attachment; filename="factura_{venta.id}.pdf"'},
     )
 
 
@@ -651,16 +635,12 @@ def enviar_factura_correo(
     usuario: Usuario = Depends(requerir_rol(*_ROLES_POS)),
 ):
     """
-    Envía la factura de una venta ya cobrada al correo indicado, con el PDF
-    adjunto (incluyendo la discriminación del impuesto agrupada por tipo).
-    Limitado a 5 envíos por minuto por IP para evitar que se use el servidor
-    de correo para enviar spam. Queda registrado en logs/negocio.log quién
-    envió la factura, a qué venta corresponde y a qué correo se envió, para
-    trazabilidad.
+    Envía la factura de una venta cobrada al correo indicado, con el PDF adjunto.
+    Limitado a 5 envíos por minuto por IP (evita usar el servidor de correo para spam).
+    Queda registrado en el log de negocio quién la envió y a qué correo.
     """
     venta = _obtener_venta_facturable_o_error(venta_id, db)
-    datos = construir_datos_factura(venta)
-    archivo_pdf = generar_pdf_factura(datos)
+    archivo_pdf = generar_pdf_factura(construir_datos_factura(venta))
 
     try:
         enviar_factura_por_correo(

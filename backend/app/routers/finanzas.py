@@ -1,28 +1,26 @@
 # Ruta: backend/app/routers/finanzas.py
-# Endpoints del modulo "Analisis Financiero e Impuestos": configuracion de
-# impuestos y margen deseado, calculo de precio de venta recomendado,
-# analisis de rentabilidad por producto (recomendaciones y advertencias,
-# respetando la configuracion propia de cada producto si la tiene) y
-# resumen financiero por periodo (ingresos, gastos, ganancia e impuestos
-# estimados).
+# Endpoints del módulo "Análisis Financiero e Impuestos": configuración de impuestos
+# y margen, cálculo de precio de venta recomendado, análisis de rentabilidad por
+# producto y resumen financiero por periodo (ingresos, gastos, ganancia e impuestos
+# estimados). Montos en pesos colombianos (COP).
 #
-# PERMISOS: todo el modulo requiere el permiso granular "finanzas_gestionar"
-# (el administrador siempre lo tiene por su rol; un empleado solo si el
-# administrador se lo asigno desde Usuarios). Se usa un permiso propio, no
-# compartido con "reportes_ver", porque aqui ademas de CONSULTAR informacion
-# financiera sensible tambien se puede MODIFICAR la configuracion global de
-# impuesto y margen del negocio (ver actualizar_configuracion_financiera).
+# PERMISOS: todo el módulo requiere el permiso "finanzas_gestionar" (el administrador
+# siempre lo tiene). Es un permiso propio porque aquí también se MODIFICA la
+# configuración global de impuesto y margen del negocio.
+#
+# CAMBIOS: el resumen carga los productos de cada venta en una sola consulta (antes una
+# por venta, lento con Neon); las fechas usan hoy_colombia(); un margen de 0 % ya no se
+# reemplaza por el margen por defecto; un margen de 100 % o más responde 400 en vez de 500.
 
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import obtener_db
 from app.dependencies import requerir_permiso
-from app.models.producto import Producto
-from app.models.venta import Venta, EstadoVenta
+from app.logs.logger import registrar_negocio
 from app.models.compra import Compra
 from app.models.finanzas import (
     ConfiguracionFinanciera,
@@ -30,6 +28,8 @@ from app.models.finanzas import (
     ETIQUETAS_TIPO_IMPUESTO,
     PORCENTAJES_REFERENCIA,
 )
+from app.models.producto import Producto
+from app.models.venta import Venta, EstadoVenta
 from app.schemas.finanzas import (
     ConfiguracionFinancieraActualizar,
     ConfiguracionFinancieraRespuesta,
@@ -44,32 +44,14 @@ from app.utils.calculadora_financiera import (
     evaluar_estado_producto,
     resolver_configuracion_efectiva,
 )
-from app.logs.logger import registrar_negocio
+from app.utils.configuracion_financiera import obtener_configuracion_financiera
+from app.utils.zona_horaria import hoy_colombia
 
 router = APIRouter(prefix="/api/finanzas", tags=["Analisis Financiero"])
 
 
-def _obtener_configuracion(db: Session) -> ConfiguracionFinanciera:
-    """
-    Devuelve la unica fila de configuracion financiera (id=1), creandola con
-    valores por defecto si el sistema nunca la ha configurado (primer uso).
-    """
-    configuracion = db.query(ConfiguracionFinanciera).filter(ConfiguracionFinanciera.id == 1).first()
-    if configuracion is None:
-        configuracion = ConfiguracionFinanciera(
-            id=1,
-            tipo_impuesto=TipoImpuesto.SIN_IMPUESTO,
-            porcentaje_impuesto=0.0,
-            margen_utilidad_deseado=30.0,
-            margen_minimo_saludable=15.0,
-        )
-        db.add(configuracion)
-        db.commit()
-        db.refresh(configuracion)
-    return configuracion
-
-
 def _a_respuesta_configuracion(configuracion: ConfiguracionFinanciera) -> ConfiguracionFinancieraRespuesta:
+    """Convierte la configuración guardada en su respuesta, con la etiqueta legible del impuesto."""
     etiqueta = (
         configuracion.nombre_impuesto_personalizado
         if configuracion.tipo_impuesto == TipoImpuesto.PERSONALIZADO and configuracion.nombre_impuesto_personalizado
@@ -87,7 +69,8 @@ def _a_respuesta_configuracion(configuracion: ConfiguracionFinanciera) -> Config
 
 
 def _resolver_rango_fechas(fecha_inicio: date | None, fecha_fin: date | None) -> tuple[datetime, datetime]:
-    fin = fecha_fin or date.today()
+    """Convierte las fechas recibidas en un rango completo (por defecto, los últimos 30 días de Colombia)."""
+    fin = fecha_fin or hoy_colombia()
     inicio = fecha_inicio or (fin - timedelta(days=30))
     if inicio > fin:
         raise HTTPException(
@@ -102,13 +85,12 @@ def _resolver_rango_fechas(fecha_inicio: date | None, fecha_fin: date | None) ->
     response_model=ConfiguracionFinancieraRespuesta,
     summary="Consultar configuracion de impuestos y margen",
 )
-def obtener_configuracion_financiera(
+def obtener_configuracion(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
-    """Devuelve la configuracion actual (global) de impuestos y margen de utilidad deseado."""
-    configuracion = _obtener_configuracion(db)
-    return _a_respuesta_configuracion(configuracion)
+    """Devuelve la configuración global actual de impuestos y margen de utilidad deseado."""
+    return _a_respuesta_configuracion(obtener_configuracion_financiera(db))
 
 
 @router.get("/impuestos-disponibles", summary="Listar los tipos de impuesto disponibles")
@@ -116,10 +98,8 @@ def listar_tipos_impuesto(
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
     """
-    Devuelve la lista de tipos de impuesto que se pueden elegir (sin
-    impuesto, IVA, INC, personalizado), junto con un porcentaje de
-    referencia editable. Se usa tanto en la configuracion global como en la
-    configuracion propia de un producto individual (Inventario).
+    Lista los tipos de impuesto elegibles (sin impuesto, IVA, INC, personalizado) con un
+    porcentaje de referencia editable. Se usa en la configuración global y en la de cada producto.
     """
     return [
         {
@@ -141,8 +121,8 @@ def actualizar_configuracion_financiera(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
-    """Actualiza el tipo de impuesto global, su porcentaje, el margen deseado y el margen mínimo saludable."""
-    configuracion = _obtener_configuracion(db)
+    """Actualiza el impuesto global, su porcentaje, el margen deseado y el margen mínimo saludable."""
+    configuracion = obtener_configuracion_financiera(db)
 
     configuracion.tipo_impuesto = datos.tipo_impuesto
     configuracion.porcentaje_impuesto = datos.porcentaje_impuesto
@@ -161,7 +141,6 @@ def actualizar_configuracion_financiera(
         f"margen deseado: {datos.margen_utilidad_deseado}%)",
         usuario=usuario.nombre_usuario,
     )
-
     return _a_respuesta_configuracion(configuracion)
 
 
@@ -176,13 +155,11 @@ def calcular_precio(
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
     """
-    Calcula el precio de venta recomendado a partir de un costo (de un
-    producto existente o de un valor libre). Si el producto tiene su PROPIA
-    configuración de impuesto/margen activada, se usa esa; si no, se usa la
-    configuración global (o la enviada puntualmente en la petición, que
-    siempre tiene la prioridad más alta si se indica un margen).
+    Calcula el precio de venta recomendado a partir de un costo (de un producto o libre).
+    Si el producto tiene configuración propia se usa esa; si no, la global. El margen
+    enviado en la petición (incluido 0) tiene siempre la prioridad más alta.
     """
-    configuracion_global = _obtener_configuracion(db)
+    configuracion_global = obtener_configuracion_financiera(db)
 
     if datos.producto_id is not None:
         producto = db.query(Producto).filter(Producto.id == datos.producto_id).first()
@@ -193,18 +170,26 @@ def calcular_precio(
         porcentaje_impuesto = config_efectiva.porcentaje_impuesto
         margen_por_defecto = config_efectiva.margen_utilidad_deseado
     else:
+        if datos.costo_compra is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Indica un producto o un costo de compra para calcular el precio.",
+            )
         costo_compra = datos.costo_compra
         porcentaje_impuesto = configuracion_global.porcentaje_impuesto
         margen_por_defecto = configuracion_global.margen_utilidad_deseado
 
-    margen = datos.margen_utilidad_deseado or margen_por_defecto
+    margen = datos.margen_utilidad_deseado if datos.margen_utilidad_deseado is not None else margen_por_defecto
 
-    resultado = calcular_precio_recomendado(
-        costo_compra=costo_compra,
-        margen_utilidad_deseado=margen,
-        porcentaje_impuesto=porcentaje_impuesto,
-        incluir_impuesto=datos.incluir_impuesto,
-    )
+    try:
+        resultado = calcular_precio_recomendado(
+            costo_compra=costo_compra,
+            margen_utilidad_deseado=margen,
+            porcentaje_impuesto=porcentaje_impuesto,
+            incluir_impuesto=datos.incluir_impuesto,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
 
     return CalculoPrecioRespuesta(
         costo_compra=resultado.costo_compra,
@@ -227,13 +212,9 @@ def analizar_productos(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
-    """
-    Analiza cada producto activo del inventario usando SU PROPIA
-    configuración de impuesto/margen si la tiene activada, o la
-    configuración global en caso contrario.
-    """
-    configuracion_global = _obtener_configuracion(db)
-    productos = db.query(Producto).filter(Producto.activo == True).all()  # noqa: E712
+    """Analiza cada producto activo con su configuración propia (si la tiene) o con la global."""
+    configuracion_global = obtener_configuracion_financiera(db)
+    productos = db.query(Producto).filter(Producto.activo.is_(True)).all()
 
     resultados: list[ProductoAnalisisFinanciero] = []
     for producto in productos:
@@ -246,15 +227,17 @@ def analizar_productos(
         )
         margen_actual = calcular_margen_actual(producto.precio_compra, producto.precio_venta)
 
-        precio_recomendado = calcular_precio_recomendado(
-            costo_compra=producto.precio_compra,
-            margen_utilidad_deseado=config_efectiva.margen_utilidad_deseado,
-            porcentaje_impuesto=config_efectiva.porcentaje_impuesto,
-            incluir_impuesto=True,
-        ).precio_venta_final
+        try:
+            precio_recomendado = calcular_precio_recomendado(
+                costo_compra=producto.precio_compra,
+                margen_utilidad_deseado=config_efectiva.margen_utilidad_deseado,
+                porcentaje_impuesto=config_efectiva.porcentaje_impuesto,
+                incluir_impuesto=True,
+            ).precio_venta_final
+        except ValueError:
+            precio_recomendado = producto.precio_venta  # Margen inválido guardado: no se recomienda un cambio
 
-        # Si el producto tiene configuración propia, se aclara en el mensaje
-        # para que el administrador entienda por qué difiere de la global.
+        # Si el producto tiene configuración propia, se aclara por qué difiere de la global
         if config_efectiva.es_configuracion_propia:
             mensaje = f"{mensaje} (impuesto propio: {config_efectiva.etiqueta_impuesto} {config_efectiva.porcentaje_impuesto}%)"
 
@@ -289,18 +272,17 @@ def resumen_financiero(
     usuario=Depends(requerir_permiso("finanzas_gestionar")),
 ):
     """
-    Calcula el panorama financiero del negocio en un periodo: cuanto entro
-    por ventas, cuanto costaron esos productos, cuanto se gasto en compras a
-    proveedores, la ganancia bruta y neta (descontando el impuesto estimado
-    sobre las ventas, sumando el impuesto ya congelado línea por línea), y
-    cuantos productos estan en perdida o bajo margen segun la configuracion
-    (propia o global) de cada uno.
+    Panorama financiero de un periodo: ingresos por ventas, costo de lo vendido, gasto en
+    compras, ganancia bruta y neta (descontando el impuesto ya congelado en cada línea de
+    venta) y cuántos productos están en pérdida o bajo margen.
     """
     inicio, fin = _resolver_rango_fechas(fecha_inicio, fecha_fin)
-    configuracion_global = _obtener_configuracion(db)
+    configuracion_global = obtener_configuracion_financiera(db)
 
+    # Los detalles se cargan junto con las ventas (una sola consulta, no una por venta)
     ventas_pagadas = (
         db.query(Venta)
+        .options(joinedload(Venta.detalles))
         .filter(
             Venta.estado == EstadoVenta.PAGADA,
             Venta.fecha_pago >= inicio,
@@ -316,8 +298,7 @@ def resumen_financiero(
     for venta in ventas_pagadas:
         for detalle in venta.detalles:
             total_costo_ventas += detalle.cantidad * detalle.precio_compra_unitario
-            # Suma el impuesto ya congelado en cada línea (si la venta es
-            # anterior a este campo, queda en 0 y no afecta el total).
+            # Impuesto ya congelado en la línea (0 en ventas anteriores a este campo)
             porcentaje_linea = detalle.porcentaje_impuesto_aplicado or 0.0
             if porcentaje_linea > 0:
                 subtotal_linea = detalle.subtotal
@@ -336,15 +317,13 @@ def resumen_financiero(
 
     ganancia_bruta = round(total_ingresos_ventas - total_costo_ventas, 2)
     ganancia_neta_estimada = round(ganancia_bruta - valor_impuesto_estimado, 2)
-
     margen_promedio_real = (
         round((ganancia_bruta / total_ingresos_ventas) * 100, 2) if total_ingresos_ventas > 0 else 0.0
     )
 
-    productos = db.query(Producto).filter(Producto.activo == True).all()  # noqa: E712
     productos_en_perdida = 0
     productos_bajo_margen = 0
-    for producto in productos:
+    for producto in db.query(Producto).filter(Producto.activo.is_(True)).all():
         estado, _ = evaluar_estado_producto(
             producto.precio_compra, producto.precio_venta, configuracion_global.margen_minimo_saludable
         )

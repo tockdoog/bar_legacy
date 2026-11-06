@@ -9,8 +9,9 @@
 #
 # ORDEN DE MIDDLEWARES (el último declarado es el más externo):
 #   CORS -> inicialización -> cabeceras de seguridad -> monitoreo -> bloqueo.
-# CORS va afuera para que hasta los 423/500/503 lleven sus cabeceras; el
-# monitoreo va afuera del bloqueo para registrar los 423 en seguridad.log.
+# CORS va afuera para que los 423/503 lleven sus cabeceras. Los errores 500 no
+# controlados los resuelve Starlette por fuera de CORS, por eso su respuesta
+# agrega las cabeceras CORS a mano (ver manejador_errores_no_controlados).
 
 import logging
 import os
@@ -63,8 +64,8 @@ from app.routers import (
     promociones,
     reportes,
     usuarios,
+    finanzas,
 )
-from app.routers import finanzas
 
 from escaner.router import router as router_escaner
 from QR.router import router as router_qr
@@ -135,6 +136,30 @@ def inicializar_sistema() -> None:
         registrar_sistema("El sistema se inicializó correctamente")
 
 
+def _sistema_bloqueado_por_suscripcion() -> bool:
+    """
+    Consulta síncrona del estado de la suscripción. Se ejecuta en un hilo aparte
+    (run_in_threadpool) para no bloquear el servidor mientras responde la base de datos.
+    """
+    db = SesionLocal()
+    try:
+        return esta_bloqueado(obtener_suscripcion(db))
+    finally:
+        db.close()
+
+
+def _cabeceras_cors_para(request: Request) -> dict[str, str]:
+    """Devuelve las cabeceras CORS para respuestas que Starlette genera fuera del middleware de CORS."""
+    origen = request.headers.get("origin")
+    if origen and origen in configuracion.lista_origenes_cors:
+        return {
+            "Access-Control-Allow-Origin": origen,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
 @asynccontextmanager
 async def ciclo_de_vida(app: FastAPI):
     """Arranque del servidor (en Vercel este evento puede no ejecutarse)."""
@@ -174,6 +199,7 @@ async def manejador_errores_no_controlados(request: Request, excepcion: Exceptio
     return JSONResponse(
         status_code=500,
         content={"detail": "Ocurrió un error interno en el servidor. Intenta de nuevo más tarde."},
+        headers=_cabeceras_cors_para(request),
     )
 
 
@@ -190,18 +216,14 @@ async def verificar_bloqueo_suscripcion(request: Request, call_next):
         return await call_next(request)
 
     if request.url.path.startswith("/api"):
-        db = SesionLocal()
-        try:
-            if esta_bloqueado(obtener_suscripcion(db)):
-                registrar_seguridad("Intento de uso con el sistema bloqueado por suscripción", request=request)
-                return JSONResponse(
-                    status_code=423,
-                    content={
-                        "detail": "El sistema está bloqueado por falta de pago. Comunícate con el proveedor para desbloquearlo."
-                    },
-                )
-        finally:
-            db.close()
+        if await run_in_threadpool(_sistema_bloqueado_por_suscripcion):
+            registrar_seguridad("Intento de uso con el sistema bloqueado por suscripción", request=request)
+            return JSONResponse(
+                status_code=423,
+                content={
+                    "detail": "El sistema está bloqueado por falta de pago. Comunícate con el proveedor para desbloquearlo."
+                },
+            )
 
     return await call_next(request)
 
@@ -221,7 +243,7 @@ async def registrar_monitoreo(request: Request, call_next):
 
 @app.middleware("http")
 async def agregar_cabeceras_seguridad(request: Request, call_next):
-    """Agrega cabeceras HTTP que mitigan XSS, clickjacking y sniffing de tipo MIME."""
+    """Agrega cabeceras HTTP que mitigan XSS, clickjacking, sniffing de tipo MIME y caché de datos privados."""
     respuesta = await call_next(request)
     respuesta.headers["X-Content-Type-Options"] = "nosniff"
     respuesta.headers["X-Frame-Options"] = "DENY"
@@ -231,6 +253,10 @@ async def agregar_cabeceras_seguridad(request: Request, call_next):
         respuesta.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
     else:
         respuesta.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+    # Las respuestas JSON de la API contienen datos del negocio: no deben guardarse en cachés
+    if request.url.path.startswith("/api") and "Cache-Control" not in respuesta.headers:
+        respuesta.headers["Cache-Control"] = "no-store"
 
     if configuracion.es_produccion:
         respuesta.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"

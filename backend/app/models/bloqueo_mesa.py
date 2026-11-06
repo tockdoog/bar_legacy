@@ -3,6 +3,9 @@
 # WebSocket (que Vercel no soporta): quien abre la cuenta de una mesa toma el
 # bloqueo y lo renueva con un "latido" periódico; si deja de renovarlo (cerró el
 # navegador, perdió conexión) expira solo a los TIEMPO_EXPIRACION_BLOQUEO_SEGUNDOS.
+#
+# CORRECCIÓN: usuario_id ahora usa ON DELETE CASCADE, para que borrar un usuario
+# con un bloqueo vigente no falle en PostgreSQL.
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 
@@ -15,7 +18,7 @@ class BloqueoMesa(Base):
     __tablename__ = "bloqueos_mesa"
 
     mesa_id = Column(Integer, ForeignKey("mesas.id", ondelete="CASCADE"), primary_key=True)
-    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
     nombre_completo = Column(String(120), nullable=False)
     nombre_usuario = Column(String(50), nullable=False)
     desde = Column(DateTime, nullable=False, default=ahora_colombia)

@@ -1,19 +1,15 @@
 # Ruta: backend/QR/router.py
-# Endpoint que genera, bajo demanda y directamente en el servidor (sin
-# depender de ninguna API externa ni de conexión a internet), el código QR
-# con la dirección HTTPS del sistema en la red local. Permite que un
-# administrador vincule un nuevo celular o tablet escaneando el código en
-# vez de escribir la dirección a mano. Solo el rol administrador puede
-# acceder, porque expone la dirección de red interna del negocio.
+# Endpoint que genera, directamente en el servidor, el código QR con la dirección
+# del sistema para vincular un celular o tablet escaneándolo, en vez de escribir
+# la dirección a mano. Solo el administrador puede usarlo.
 #
-# IMPORTANTE: el QR usa la IP local del servidor (IP_SERVIDOR) y NO el
-# hostname fijo (NOMBRE_HOST/"barlegacy.local"). Esto es intencional: los
-# celulares (Android/iOS) no pueden resolver ese hostname sin instalar una
-# app externa para editar su archivo hosts, mientras que una dirección IP
-# funciona de inmediato al escanearla, sin ninguna configuración adicional
-# en el dispositivo. Las computadoras, en cambio, siguen usando el
-# hostname fijo (ver execution/windows/instalar.bat, que lo agrega al
-# archivo hosts de la máquina donde corre el instalador).
+# CAMBIO PARA VERCEL:
+# - Producción (ENTORNO=produccion): el QR apunta al dominio del frontend, el primer
+#   origen de CORS_ORIGINS (ej. https://tu-frontend.vercel.app). Ya no se usa IP_SERVIDOR.
+# - Desarrollo (red local): se mantiene la lógica anterior con la IP local (IP_SERVIDOR),
+#   porque los celulares no resuelven "barlegacy.local" sin configuración adicional.
+#
+# El QR se genera en memoria y nunca se guarda en disco.
 
 import base64
 import io
@@ -30,45 +26,43 @@ from QR.schemas import InformacionDispositivoQR
 router = APIRouter(prefix="/api/qr", tags=["Vinculación de dispositivos"])
 
 
+def _resolver_url_acceso() -> str:
+    """Devuelve la dirección que debe abrir el dispositivo, según el entorno."""
+    if configuracion.es_produccion:
+        origenes = configuracion.lista_origenes_cors
+        if not origenes:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay un dominio configurado. Define CORS_ORIGINS con la dirección del frontend.",
+            )
+        return origenes[0]
+
+    if not configuracion.IP_SERVIDOR:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No se detectó una IP de red para este servidor. Define IP_SERVIDOR "
+                "(por ejemplo 192.168.0.14) en el archivo .env."
+            ),
+        )
+    return f"https://{configuracion.IP_SERVIDOR}:5443"
+
+
 @router.get("/dispositivo", response_model=InformacionDispositivoQR)
 @limitador.limit("20/minute")  # Protege contra generación abusiva del QR
 def obtener_qr_dispositivo(
     request: Request,
     usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ) -> InformacionDispositivoQR:
-    """
-    Genera el código QR con la URL HTTPS del sistema apuntando a la IP local
-    del servidor, para que un celular lo escanee y abra el sistema sin
-    escribir la dirección a mano ni necesitar configuración de red previa.
-    """
-    # --- Bloque: valida que la IP del servidor esté configurada ---
-    # IP_SERVIDOR se detecta automáticamente en la instalación (ver
-    # execution/windows/instalar.bat) y se inyecta vía docker-compose. Si
-    # llegara vacía (ej. no se pudo detectar la red, o se corrió el backend
-    # fuera del instalador oficial), se informa el problema con claridad en
-    # vez de generar un QR con una URL rota.
-    if not configuracion.IP_SERVIDOR:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No se detectó una IP de red para este servidor. Vuelve a "
-                "ejecutar el instalador para detectarla automáticamente, o "
-                "define IP_SERVIDOR manualmente en docker/.env."
-            ),
-        )
+    """Genera el código QR con la dirección del sistema para vincular un nuevo dispositivo."""
+    url_acceso = _resolver_url_acceso()
 
-    # --- Bloque: arma la URL de acceso a partir de la IP local del servidor ---
-    url_acceso = f"https://{configuracion.IP_SERVIDOR}:5443"
-
-    # --- Bloque: genera la imagen del QR en memoria (nunca se guarda en disco,
-    # así no queda ningún archivo con datos de red del negocio en el servidor) ---
+    # Bloque: genera la imagen del QR en memoria
     imagen_qr = qrcode.make(url_acceso, box_size=10, border=2)
     buffer_imagen = io.BytesIO()
     imagen_qr.save(buffer_imagen, format="PNG")
 
-    # --- Bloque: codifica la imagen como base64 para enviarla directamente
-    # al frontend en la misma respuesta, sin necesidad de un endpoint de
-    # archivo estático aparte ni de guardar nada en disco ---
+    # Bloque: la imagen viaja en base64 dentro de la misma respuesta (sin archivos en disco)
     imagen_base64 = base64.b64encode(buffer_imagen.getvalue()).decode("utf-8")
 
     return InformacionDispositivoQR(

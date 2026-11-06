@@ -1,9 +1,14 @@
 // frontend/src/pages/test/Diagnostico.jsx
 // Ruta de pruebas (/test): verifica de punta a punta que el frontend está bien
-// conectado al backend: URL configurada, mixed content, CORS, zona horaria,
-// salud de la API, suscripción, logo y, si hay sesión, los endpoints
-// principales según el rol. Es pública para poder usarla antes de iniciar
-// sesión. No muestra secretos. Elimínala o restríngela antes de entregar.
+// conectado al backend: URL configurada, mixed content, CORS, zona horaria, salud
+// de la API, suscripción, logo y, si hay sesión, los endpoints principales según el
+// rol. Es pública para poder usarla antes de iniciar sesión. No muestra secretos.
+// Ocúltala con VITE_HABILITAR_TEST=false cuando termines las pruebas.
+//
+// CAMBIOS: la prueba de salud se ejecuta primero y el resto después. En Vercel, la
+// primera petición tras un rato sin uso crea las tablas (arranque en frío); lanzar 12
+// peticiones a la vez en ese momento hacía fallar varias con un 503. También se
+// protege la lectura de permisos cuando el perfil no los trae.
 
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -13,6 +18,9 @@ import api, { mensajeDeError, urlApi } from '../../services/api.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { horaActualBogota, hoyBogota } from '../../utils/formato.js';
 import '../../styles/diagnostico.css';
+
+// Pruebas que deben terminar antes de lanzar las demás (despiertan el servidor y la base de datos)
+const PRUEBAS_PRIMERO = ['salud'];
 
 // Bloque: crea una prueba que consulta un endpoint GET; un 403 se reporta como alerta (rol sin permiso)
 const consultar = (ruta, describir, params) => async () => {
@@ -88,7 +96,10 @@ const PRUEBAS = [
     id: 'perfil',
     nombre: 'Sesión y perfil (/api/auth/yo)',
     sesion: true,
-    ejecutar: consultar('/api/auth/yo', (d) => `${d.nombre_completo} · rol ${d.rol} · ${d.permisos.length} permiso(s)`),
+    ejecutar: consultar(
+      '/api/auth/yo',
+      (d) => `${d.nombre_completo} · rol ${d.rol} · ${(d.permisos || []).length} permiso(s)`
+    ),
   },
   {
     id: 'productos',
@@ -140,7 +151,7 @@ const PRUEBAS = [
   },
 ];
 
-// Bloque: icono y texto según el estado de cada prueba
+// Bloque: icono según el estado de cada prueba
 const ICONOS = {
   ok: <CheckCircle2 size={20} color="var(--verde)" aria-label="Correcta" />,
   alerta: <AlertTriangle size={20} color="var(--dorado-oscuro)" aria-label="Advertencia" />,
@@ -154,7 +165,20 @@ export default function Diagnostico() {
   const [resultados, setResultados] = useState({});
   const [ejecutando, setEjecutando] = useState(false);
 
-  // Bloque: ejecuta todas las pruebas en paralelo y va mostrando cada resultado al terminar
+  // Bloque: ejecuta una prueba y guarda su resultado con el tiempo que tardó
+  const ejecutarPrueba = useCallback(async (prueba) => {
+    const inicio = performance.now();
+    let resultado;
+    try {
+      resultado = await prueba.ejecutar();
+    } catch (error) {
+      resultado = { estado: 'error', detalle: mensajeDeError(error) };
+    }
+    const ms = Math.round(performance.now() - inicio);
+    setResultados((previo) => ({ ...previo, [prueba.id]: { ...resultado, ms } }));
+  }, []);
+
+  // Bloque: omite las pruebas que no aplican y ejecuta el resto: primero la salud, luego las demás en paralelo
   const ejecutarTodo = useCallback(async () => {
     setEjecutando(true);
     const inicial = {};
@@ -169,21 +193,11 @@ export default function Diagnostico() {
     });
     setResultados(inicial);
 
-    await Promise.all(
-      PRUEBAS.filter((prueba) => inicial[prueba.id].estado === 'cargando').map(async (prueba) => {
-        const inicio = performance.now();
-        let resultado;
-        try {
-          resultado = await prueba.ejecutar();
-        } catch (error) {
-          resultado = { estado: 'error', detalle: mensajeDeError(error) };
-        }
-        const ms = Math.round(performance.now() - inicio);
-        setResultados((previo) => ({ ...previo, [prueba.id]: { ...resultado, ms } }));
-      })
-    );
+    const pendientes = PRUEBAS.filter((prueba) => inicial[prueba.id].estado === 'cargando');
+    await Promise.all(pendientes.filter((p) => PRUEBAS_PRIMERO.includes(p.id)).map(ejecutarPrueba));
+    await Promise.all(pendientes.filter((p) => !PRUEBAS_PRIMERO.includes(p.id)).map(ejecutarPrueba));
     setEjecutando(false);
-  }, [autenticado, tienePermiso]);
+  }, [autenticado, tienePermiso, ejecutarPrueba]);
 
   useEffect(() => {
     ejecutarTodo();

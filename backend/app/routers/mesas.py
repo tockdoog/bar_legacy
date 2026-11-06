@@ -6,11 +6,15 @@
 #   POST   /api/mesas/{id}/bloqueo        -> tomar o renovar (latido) el bloqueo
 #   DELETE /api/mesas/{id}/bloqueo        -> liberar (solo el propio)
 # Un bloqueo sin latido por TIEMPO_EXPIRACION_BLOQUEO_SEGUNDOS se considera libre.
-# CAMBIO: listar_mesas hace una sola consulta de ventas abiertas (antes una por mesa).
+#
+# CAMBIOS: listar_mesas hace una sola consulta de ventas abiertas. En PostgreSQL
+# (a diferencia de SQLite) las llaves foráneas sí se hacen cumplir: eliminar una
+# mesa con ventas históricas y crear/renombrar con un número repetido ahora
+# responden con un mensaje claro en vez de un error 500.
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -163,7 +167,12 @@ def crear_mesa(
 
     nueva_mesa = Mesa(numero=datos.numero, estado=EstadoMesa.LIBRE)
     db.add(nueva_mesa)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Dos solicitudes simultáneas con el mismo número: la segunda llega aquí
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe una mesa con ese número")
     db.refresh(nueva_mesa)
     return _convertir_a_respuesta(nueva_mesa, db)
 
@@ -185,9 +194,21 @@ def actualizar_mesa(
     for campo, valor in cambios.items():
         if valor is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"El campo '{campo}' no puede quedar vacío")
+
+    # El nuevo número no puede coincidir con el de otra mesa
+    nuevo_numero = cambios.get("numero")
+    if nuevo_numero and nuevo_numero != mesa.numero:
+        if db.query(Mesa).filter(Mesa.numero == nuevo_numero).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe una mesa con ese número")
+
+    for campo, valor in cambios.items():
         setattr(mesa, campo, valor)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe una mesa con ese número")
     db.refresh(mesa)
     return _convertir_a_respuesta(mesa, db)
 
@@ -198,7 +219,7 @@ def eliminar_mesa(
     db: Session = Depends(obtener_db),
     usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
-    """Elimina una mesa, siempre que no tenga una venta abierta en curso."""
+    """Elimina una mesa, siempre que esté libre y no tenga ventas registradas a su nombre."""
     mesa = db.query(Mesa).filter(Mesa.id == mesa_id).first()
     if not mesa:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mesa no encontrada")
@@ -206,7 +227,15 @@ def eliminar_mesa(
     if mesa.estado != EstadoMesa.LIBRE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se puede eliminar una mesa que está en uso")
 
-    # El bloqueo se borra primero (en PostgreSQL la llave foránea lo exigiría)
-    db.query(BloqueoMesa).filter(BloqueoMesa.mesa_id == mesa_id).delete()
-    db.delete(mesa)
-    db.commit()
+    try:
+        # El bloqueo se borra primero (en PostgreSQL la llave foránea lo exigiría)
+        db.query(BloqueoMesa).filter(BloqueoMesa.mesa_id == mesa_id).delete()
+        db.delete(mesa)
+        db.commit()
+    except IntegrityError:
+        # La mesa tiene ventas históricas: borrarla dejaría esas ventas sin referencia
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La mesa tiene ventas registradas y no puede eliminarse.",
+        )
