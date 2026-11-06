@@ -1,6 +1,10 @@
 // frontend/src/services/modules/ventasService.js
 // Servicios del punto de venta: abrir venta, carrito, cobro, cancelación y
 // facturación. Rutas exactas de app/routers/ventas.py.
+//
+// CORRECCIÓN: al descargar el PDF se pide la respuesta como archivo binario; si el
+// servidor responde con un error, el mensaje llegaba como Blob y el usuario veía un
+// texto genérico. Ahora se lee el mensaje real del servidor antes de lanzar el error.
 
 import api from '../api.js';
 
@@ -90,10 +94,32 @@ export async function obtenerDatosFactura(ventaId) {
   return data;
 }
 
+// Bloque: cuando se pide un archivo (blob) y el servidor responde con error, el cuerpo
+// del error también llega como Blob. Se convierte a JSON para que mensajeDeError
+// (api.js) pueda mostrar el mensaje real en español.
+async function leerErrorDeBlob(error) {
+  const cuerpo = error?.response?.data;
+  if (cuerpo instanceof Blob) {
+    try {
+      error.response.data = JSON.parse(await cuerpo.text());
+    } catch {
+      // Si no es JSON, se deja el error tal cual
+    }
+  }
+  return error;
+}
+
 // Bloque: descarga la factura en PDF (se pide como archivo binario con el token)
 export async function descargarFacturaPdf(ventaId) {
-  const { data } = await api.get(`/api/ventas/${ventaId}/factura/pdf`, { responseType: 'blob' });
-  const url = URL.createObjectURL(data);
+  let datos;
+  try {
+    const respuesta = await api.get(`/api/ventas/${ventaId}/factura/pdf`, { responseType: 'blob' });
+    datos = respuesta.data;
+  } catch (error) {
+    throw await leerErrorDeBlob(error);
+  }
+
+  const url = URL.createObjectURL(datos);
   const enlace = document.createElement('a');
   enlace.href = url;
   enlace.download = `factura_${ventaId}.pdf`;

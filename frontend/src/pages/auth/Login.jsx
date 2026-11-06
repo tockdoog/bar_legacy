@@ -1,16 +1,24 @@
 // frontend/src/pages/auth/Login.jsx
-// Pantalla de inicio de sesión de Bar Legacy: validación básica, mostrar u
-// ocultar contraseña, mensajes de error claros (credenciales, cuenta bloqueada,
-// límite de intentos, conexión) y animación sutil de entrada.
+// Pantalla de inicio de sesión de Bar Legacy: validación básica, mostrar u ocultar
+// contraseña, mensajes de error claros (credenciales, cuenta bloqueada, límite de
+// intentos, conexión) y animación sutil de entrada.
+//
+// CAMBIOS PARA VERCEL + NEON (plan gratuito): tras un rato sin uso, la función de Vercel y
+// la base de Neon están "dormidas" y la primera petición tarda varios segundos.
+// - Al abrir esta pantalla se llama en silencio a /api/salud para despertarlos mientras
+//   la persona escribe sus datos.
+// - Si el inicio de sesión tarda más de 4 segundos, se explica el motivo en pantalla.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff, Loader2, LogIn, Lock, User } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '../../context/AuthContext.jsx';
-import { mensajeDeError, urlApi } from '../../services/api.js';
+import api, { mensajeDeError, urlApi } from '../../services/api.js';
+
+const MS_AVISO_LENTO = 4000;
 
 export default function Login() {
   const { iniciarSesion } = useAuth();
@@ -22,8 +30,24 @@ export default function Login() {
   const [contrasena, setContrasena] = useState('');
   const [verContrasena, setVerContrasena] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [lento, setLento] = useState(false);
   const [error, setError] = useState('');
   const [logoDisponible, setLogoDisponible] = useState(true);
+
+  // Bloque: despierta el servidor y la base de datos apenas se abre la pantalla
+  useEffect(() => {
+    api.get('/api/salud').catch(() => {});
+  }, []);
+
+  // Bloque: si el inicio de sesión tarda, muestra el aviso de que el servidor está despertando
+  useEffect(() => {
+    if (!enviando) {
+      setLento(false);
+      return undefined;
+    }
+    const temporizador = setTimeout(() => setLento(true), MS_AVISO_LENTO);
+    return () => clearTimeout(temporizador);
+  }, [enviando]);
 
   // Bloque: valida los campos, inicia sesión y redirige al destino original
   async function manejarEnvio(evento) {
@@ -128,6 +152,12 @@ export default function Login() {
             {enviando ? <Loader2 className="girar" size={18} /> : <LogIn size={18} />}
             {enviando ? 'Verificando…' : 'Iniciar sesión'}
           </button>
+
+          {lento && (
+            <p className="texto-suave" role="status" aria-live="polite">
+              El servidor estaba en reposo y se está activando. Puede tardar unos segundos…
+            </p>
+          )}
         </form>
       </motion.section>
     </main>

@@ -1,16 +1,19 @@
 # Ruta: backend/escaner/schemas.py
-# Esquemas Pydantic para las respuestas del módulo de escáner de códigos de barras.
-# Se mantienen separados de app/schemas/producto.py para no acoplar el módulo
-# de escáner con la lógica interna del inventario.
+# Esquemas Pydantic del módulo de escáner de códigos de barras. Se mantienen separados
+# de app/schemas/producto.py para no acoplar el escáner con la lógica del inventario.
+#
+# CORRECCIÓN: el código escaneado y el origen tienen largo máximo (64 y 30), igual que
+# las columnas de la tabla escaneos_log, que PostgreSQL sí hace cumplir.
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ResultadoEscaneo(BaseModel):
     """
-    Respuesta devuelta al frontend cuando se busca un producto por código de barras.
-    Incluye solo los campos relevantes para decidir la acción (agregar al carrito
-    o pre-rellenar el formulario de inventario), sin exponer datos internos del ORM.
+    Respuesta al buscar un producto por código de barras. Incluye solo los campos
+    relevantes para decidir la acción (agregar al carrito o pre-rellenar el formulario
+    de inventario), sin exponer datos internos del ORM. "precio_compra" solo llega a
+    quien puede ver costos.
     """
 
     encontrado: bool  # True si existe un producto activo con ese código
@@ -33,10 +36,10 @@ class ResultadoEscaneo(BaseModel):
 class RegistroEscaneoBitacora(BaseModel):
     """
     Registro de auditoría enviado por el frontend cada vez que se escanea un código.
-    Permite detectar intentos repetidos de códigos inexistentes (posible inventario
-    desactualizado o intento de manipulación) sin guardar datos sensibles del cliente.
+    Permite detectar intentos repetidos de códigos inexistentes (inventario desactualizado
+    o intento de manipulación) sin guardar datos sensibles del cliente.
     """
 
-    codigo_escaneado: str  # Valor leído por el escáner (nunca se guarda completo en logs)
-    origen: str  # "inventario" | "pos" | "compras" – módulo desde donde se escaneó
+    codigo_escaneado: str = Field(min_length=1, max_length=64)  # Nunca se guarda completo en logs
+    origen: str = Field(min_length=1, max_length=30)  # "inventario" | "pos" | "compras"
     encontrado: bool  # Si el código existía en el momento del escaneo

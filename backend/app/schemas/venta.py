@@ -1,15 +1,24 @@
 # Ruta: backend/app/schemas/venta.py
-# Esquemas de validación de datos para el flujo completo de una venta:
-# apertura del carrito, agregar/quitar productos, agregar promociones (combos),
-# cobro (con uno o varios métodos de pago: factura partida), anulación
-# posterior de una venta ya cobrada (con motivo obligatorio) y envío de la
-# factura por correo electrónico.
+# Esquemas de validación de datos para el flujo completo de una venta: apertura del
+# carrito, agregar/quitar productos, promociones (combos), cobro (uno o varios métodos
+# de pago: factura partida), anulación de una venta ya cobrada (con motivo obligatorio)
+# y envío de la factura por correo electrónico. Montos en pesos colombianos (COP).
+#
+# CORRECCIONES (PostgreSQL/Neon):
+# - Cantidades y montos con tope: sin él, un entero mayor a 2.147 millones desborda la
+#   columna Integer (error 500) y un monto "Infinity" pasaba la validación "mayor a 0".
+# - El motivo de anulación se limpia de espacios antes de validar el largo mínimo.
 
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models.venta import EstadoVenta, MetodoPago
+
+# Topes razonables para un punto de venta (evitan desbordes en la base de datos)
+CANTIDAD_MAXIMA_ITEM = 10_000
+CANTIDAD_MAXIMA_PROMOCION = 1_000
+MONTO_MAXIMO_PAGO = 100_000_000_000  # Cien mil millones de pesos
 
 
 # --- Bloque: apertura de venta ---
@@ -22,55 +31,46 @@ class VentaCrear(BaseModel):
 class ItemVentaCrear(BaseModel):
     """Datos para agregar un producto al carrito de una venta abierta."""
     producto_id: int
-    cantidad: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=CANTIDAD_MAXIMA_ITEM)
 
 
 class ItemVentaActualizar(BaseModel):
     """Datos para modificar la cantidad de un producto ya agregado al carrito."""
-    cantidad: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=CANTIDAD_MAXIMA_ITEM)
 
 
 # --- Bloque: agregar una promoción (combo de productos) al carrito ---
 class PromocionVentaCrear(BaseModel):
     """
-    Datos para agregar una promoción (combo de productos) al carrito de una
-    venta abierta. "cantidad" es la cantidad de VECES que se agrega el combo
-    completo (no de un producto individual): el router (ventas.py) multiplica
-    esta cantidad por la cantidad de cada producto componente de la promoción.
+    Datos para agregar una promoción al carrito. "cantidad" es la cantidad de VECES que
+    se agrega el combo completo: el router multiplica esta cantidad por la de cada
+    producto componente.
     """
     promocion_id: int
-    cantidad: int = Field(gt=0)
+    cantidad: int = Field(gt=0, le=CANTIDAD_MAXIMA_PROMOCION)
 
 
 # --- Bloque: cobro de la venta (soporta factura partida: varios métodos) ---
 class PagoParcial(BaseModel):
     """
-    Un único pago dentro del cobro de una venta. Una venta con un solo método
-    de pago envía una lista con un solo PagoParcial; una factura partida (ej.
-    mitad efectivo, mitad Nequi) envía dos o más.
+    Un pago dentro del cobro de una venta. Con un solo método se envía una lista con
+    un PagoParcial; con factura partida (ej. mitad efectivo, mitad Nequi), dos o más.
     """
     metodo_pago: MetodoPago
-    monto: float = Field(gt=0)
+    monto: float = Field(gt=0, le=MONTO_MAXIMO_PAGO)
 
 
 class PagoVenta(BaseModel):
     """
-    Datos para cobrar una venta abierta. "pagos" es la lista de métodos de
-    pago usados (uno o varios, para soportar factura partida). Pydantic valida
-    automáticamente que cada método esté dentro del enum MetodoPago y que
-    cada monto sea positivo, rechazando cualquier valor fuera de esas reglas
-    con un error 422 antes de que el dato llegue a la base de datos.
-    La suma de todos los montos debe cubrir el total de la venta; esa
-    validación puntual (que depende del total de la venta, no solo de la
-    forma del dato) se hace en el router, no aquí.
+    Datos para cobrar una venta abierta. "pagos" es la lista de métodos usados. Pydantic
+    valida que cada método esté en el enum MetodoPago y que cada monto sea positivo y
+    razonable. Que la suma cubra el total se valida en el router, porque depende de la venta.
     """
     pagos: list[PagoParcial] = Field(min_length=1, max_length=6)
 
     @model_validator(mode="after")
     def _validar_pagos_no_vacios(self) -> "PagoVenta":
-        # Refuerzo adicional: cada pago individual ya exige monto > 0 (arriba),
-        # pero se valida aquí también que la lista no llegue vacía por algún
-        # cliente HTTP que ignore las restricciones de Pydantic del campo.
+        # Refuerzo: la lista no debe llegar vacía aunque un cliente HTTP ignore las restricciones del campo
         if not self.pagos:
             raise ValueError("Debes indicar al menos un método de pago con su monto.")
         return self
@@ -79,23 +79,24 @@ class PagoVenta(BaseModel):
 # --- Bloque: anulación de una venta ya cobrada ---
 class VentaAnular(BaseModel):
     """
-    Datos para anular una venta que YA estaba cobrada. El motivo es
-    obligatorio (mínimo 3 caracteres) para dejar trazabilidad de por qué se
-    anuló, junto con el usuario que la anula (se toma de la sesión
-    autenticada, no de este esquema, para que no se pueda falsificar). Los
-    productos anulados no se piden aquí: se toman automáticamente de los
-    detalles ya guardados de la venta (nunca se borran al anular).
+    Datos para anular una venta YA cobrada. El motivo es obligatorio (mínimo 3 caracteres
+    sin contar espacios de los bordes) para dejar trazabilidad. El usuario que anula se
+    toma de la sesión autenticada y los productos, de los detalles ya guardados.
     """
     motivo: str = Field(min_length=3, max_length=300)
+
+    @field_validator("motivo", mode="before")
+    @classmethod
+    def _limpiar_motivo(cls, valor):
+        """Quita espacios de los bordes ANTES de validar el largo mínimo."""
+        return valor.strip() if isinstance(valor, str) else valor
 
 
 # --- Bloque: envío de la factura de una venta ya cobrada por correo ---
 class FacturaEnviarCorreo(BaseModel):
     """
-    Datos para enviar la factura de una venta ya cobrada al correo del
-    cliente. Pydantic valida automáticamente que "correo" tenga un formato
-    de correo electrónico válido (EmailStr), rechazando cualquier texto que
-    no lo sea con un error 422 antes de intentar el envío por SMTP.
+    Datos para enviar la factura al correo del cliente. EmailStr rechaza con un 422 todo
+    texto que no sea un correo válido, antes de intentar el envío por SMTP.
     """
     correo: EmailStr
 
@@ -127,9 +128,8 @@ class PagoDetalleRespuesta(BaseModel):
 # --- Bloque: respuesta completa de una venta ---
 class VentaRespuesta(BaseModel):
     """
-    Representa una venta completa, con sus productos, totales, el desglose de
-    pagos (uno o varios métodos) y, si aplica, los datos de auditoría de su
-    anulación. Los productos anulados se consultan a través de "detalles"
+    Venta completa, con sus productos, totales, el desglose de pagos y, si aplica, los
+    datos de auditoría de su anulación. Los productos anulados se consultan en "detalles"
     (no se borran al anular la venta).
     """
     id: int

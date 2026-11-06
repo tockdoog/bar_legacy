@@ -2,12 +2,15 @@
 # Endpoints para crear, listar, actualizar y eliminar categorías de productos.
 #
 # CAMBIOS:
-# - Se agrega PUT /{categoria_id} para editar nombre y descripción.
-# - Al eliminar, se rechaza si hay productos ACTIVOS en la categoría (con
-#   PostgreSQL/Neon las llaves foráneas sí se hacen cumplir y daría error 500).
-#   Los productos inactivos que la usaban quedan sin categoría.
+# - El nombre se compara sin distinguir mayúsculas: PostgreSQL sí distingue y permitiría
+#   "Bebidas" y "bebidas" como categorías distintas.
+# - Si dos solicitudes crean el mismo nombre a la vez, la restricción única responde 400 (antes 500).
+# - Al eliminar, se rechaza si hay productos ACTIVOS en la categoría (con PostgreSQL las
+#   llaves foráneas sí se hacen cumplir). Los productos inactivos quedan sin categoría.
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import obtener_db
@@ -18,6 +21,25 @@ from app.models.usuario import RolUsuario
 from app.schemas.categoria import CategoriaActualizar, CategoriaCrear, CategoriaRespuesta
 
 router = APIRouter(prefix="/api/categorias", tags=["Categorías"])
+
+MENSAJE_NOMBRE_DUPLICADO = "Ya existe una categoría con ese nombre"
+
+
+def _nombre_en_uso(db: Session, nombre: str, excluir_id: int | None = None) -> bool:
+    """Indica si ya existe otra categoría con ese nombre (sin distinguir mayúsculas)."""
+    consulta = db.query(Categoria.id).filter(func.lower(Categoria.nombre) == nombre.lower())
+    if excluir_id is not None:
+        consulta = consulta.filter(Categoria.id != excluir_id)
+    return consulta.first() is not None
+
+
+def _confirmar_o_rechazar_duplicado(db: Session) -> None:
+    """Confirma los cambios; si otra petición creó el mismo nombre a la vez, responde 400."""
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MENSAJE_NOMBRE_DUPLICADO)
 
 
 @router.get("/", response_model=list[CategoriaRespuesta])
@@ -36,12 +58,12 @@ def crear_categoria(
     usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
     """Crea una nueva categoría (solo el administrador puede hacerlo)."""
-    if db.query(Categoria).filter(Categoria.nombre == datos.nombre).first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe una categoría con ese nombre")
+    if _nombre_en_uso(db, datos.nombre):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MENSAJE_NOMBRE_DUPLICADO)
 
     nueva_categoria = Categoria(**datos.model_dump())
     db.add(nueva_categoria)
-    db.commit()
+    _confirmar_o_rechazar_duplicado(db)
     db.refresh(nueva_categoria)
     return nueva_categoria
 
@@ -60,22 +82,17 @@ def actualizar_categoria(
 
     datos_dict = datos.model_dump(exclude_unset=True)
 
-    # El nombre es obligatorio en la base de datos: no puede quedar vacío
+    # El nombre es obligatorio en la base de datos: no puede quedar vacío ni repetido
     if "nombre" in datos_dict:
         if datos_dict["nombre"] is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El nombre no puede quedar vacío")
-        duplicada = (
-            db.query(Categoria)
-            .filter(Categoria.nombre == datos_dict["nombre"], Categoria.id != categoria_id)
-            .first()
-        )
-        if duplicada:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ya existe una categoría con ese nombre")
+        if _nombre_en_uso(db, datos_dict["nombre"], excluir_id=categoria_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=MENSAJE_NOMBRE_DUPLICADO)
 
     for campo, valor in datos_dict.items():
         setattr(categoria, campo, valor)
 
-    db.commit()
+    _confirmar_o_rechazar_duplicado(db)
     db.refresh(categoria)
     return categoria
 

@@ -1,44 +1,50 @@
-# Ruta: backend/app/schemas/compra.py
-# Esquemas de validación de datos para registrar una compra a un proveedor
-# (cabecera + lista de productos comprados) y para mostrarla en el frontend.
+# Ruta: backend/app/models/compra.py
+# Modelos de base de datos para los pedidos de compra a proveedores. Al registrar una
+# compra, el inventario de cada producto involucrado aumenta automáticamente.
+#
+# ZONA HORARIA: la fecha de la compra se guarda con ahora_colombia() (hora local de
+# Colombia, sin zona), igual que las ventas.
+#
+# CAMBIO: índices en "fecha" (la filtran los reportes y el resumen financiero) y en las
+# llaves foráneas "compra_id" y "proveedor_id". PostgreSQL no indexa solo las llaves
+# foráneas y, sin índices, las consultas se vuelven lentas al crecer el historial.
 
-from datetime import datetime
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 
-from pydantic import BaseModel, Field
-
-
-class ItemCompraCrear(BaseModel):
-    """Datos de un producto dentro de una compra a registrar."""
-    producto_id: int
-    cantidad: int = Field(gt=0)
-    costo_unitario: float = Field(ge=0)
-
-
-class CompraCrear(BaseModel):
-    """Datos completos para registrar una nueva compra a un proveedor."""
-    proveedor_id: int
-    items: list[ItemCompraCrear] = Field(min_length=1)
+from app.database import Base
+from app.utils.zona_horaria import ahora_colombia
 
 
-class DetalleCompraRespuesta(BaseModel):
-    """Representa un producto dentro del detalle de una compra ya registrada."""
-    id: int
-    producto_id: int
-    nombre_producto: str
-    cantidad: int
-    costo_unitario: float
-    subtotal: float
+class Compra(Base):
+    """Tabla de compras registradas a un proveedor (cabecera de la compra)."""
+    __tablename__ = "compras"
 
-    model_config = {"from_attributes": True}
+    id = Column(Integer, primary_key=True, index=True)
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id"), nullable=False, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+
+    fecha = Column(DateTime, default=ahora_colombia, index=True)
+    total = Column(Float, nullable=False, default=0)  # Pesos colombianos (COP)
+
+    detalles = relationship("DetalleCompra", back_populates="compra", cascade="all, delete-orphan")
+    proveedor = relationship("Proveedor")
 
 
-class CompraRespuesta(BaseModel):
-    """Representa una compra completa, con el nombre del proveedor y sus productos."""
-    id: int
-    proveedor_id: int
-    nombre_proveedor: str
-    fecha: datetime
-    total: float
-    detalles: list[DetalleCompraRespuesta] = []
+class DetalleCompra(Base):
+    """Cada fila representa un producto incluido dentro de una compra a proveedor."""
+    __tablename__ = "detalles_compra"
 
-    model_config = {"from_attributes": True}
+    id = Column(Integer, primary_key=True, index=True)
+    compra_id = Column(Integer, ForeignKey("compras.id"), nullable=False, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id"), nullable=False)
+
+    cantidad = Column(Integer, nullable=False)
+    costo_unitario = Column(Float, nullable=False)
+
+    compra = relationship("Compra", back_populates="detalles")
+    producto = relationship("Producto")
+
+    @property
+    def subtotal(self) -> float:
+        return round(self.cantidad * self.costo_unitario, 2)

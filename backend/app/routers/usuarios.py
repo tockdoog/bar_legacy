@@ -1,16 +1,18 @@
 # Ruta: backend/app/routers/usuarios.py
-# Endpoints para la gestión de usuarios del sistema: el administrador puede
-# listar, crear, editar, activar/desactivar, restablecer contraseñas y
-# asignar permisos granulares a los empleados; cualquier usuario autenticado
-# puede cambiar su propia contraseña.
+# Endpoints para la gestión de usuarios: el administrador puede listar, crear, editar,
+# activar/desactivar, restablecer contraseñas y asignar permisos granulares a los
+# empleados; cualquier usuario autenticado puede cambiar su propia contraseña.
 #
 # CAMBIOS EN ESTA VERSIÓN:
-# - Una contraseña de más de 72 bytes (posible con tildes aunque tenga menos de
-#   72 caracteres) ahora responde 400 en vez de un error 500.
-# - Crear, editar, restablecer y cambiar contraseñas quedan registrados en
-#   logs/sistema.log, sin guardar nunca la contraseña.
+# - Dos solicitudes simultáneas con el mismo usuario o correo responden 400 (antes 500).
+# - Al quitar el rol o desactivar a un administrador se bloquean las filas de los demás
+#   administradores activos: dos cambios simultáneos ya no pueden dejar el sistema sin ninguno.
+# - Cambiar la propia contraseña queda limitado a 5 intentos por minuto.
+# - Una contraseña de más de 72 bytes responde 400 en vez de 500.
+# - Los cambios sensibles quedan en el log del sistema, sin guardar nunca la contraseña.
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import obtener_db
@@ -27,6 +29,7 @@ from app.schemas.usuario import (
     PermisoDisponible,
 )
 from app.security import cifrar_contrasena, verificar_contrasena
+from app.utils.limitador import limitador
 
 router = APIRouter(prefix="/api/usuarios", tags=["Usuarios"])
 
@@ -37,6 +40,21 @@ def _cifrar_o_400(contrasena: str) -> str:
         return cifrar_contrasena(contrasena)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
+
+
+def _confirmar_o_rechazar_duplicado(db: Session) -> None:
+    """
+    Confirma los cambios. Si otra petición creó o cambió al mismo tiempo el mismo
+    usuario o correo, la restricción única de la base de datos falla: se responde 400.
+    """
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El nombre de usuario o el correo ya están registrados.",
+        )
 
 
 @router.get("/", response_model=list[UsuarioRespuesta])
@@ -53,9 +71,8 @@ def listar_permisos_disponibles(
     usuario=Depends(requerir_rol(RolUsuario.ADMINISTRADOR)),
 ):
     """
-    Devuelve el catálogo de permisos granulares que el administrador puede
-    asignar a un empleado, para que el frontend arme la lista de casillas
-    del formulario de usuario sin duplicar esos textos.
+    Devuelve el catálogo de permisos granulares que el administrador puede asignar a un
+    empleado, para que el frontend arme las casillas del formulario sin duplicar textos.
     """
     return [
         PermisoDisponible(clave=clave, descripcion=descripcion)
@@ -84,14 +101,14 @@ def crear_usuario(
         activo=True,
     )
 
-    # Los permisos granulares solo aplican a empleados: un administrador ya
-    # tiene acceso completo por su rol, así que se ignoran para esa cuenta.
+    # Los permisos granulares solo aplican a empleados: un administrador ya tiene
+    # acceso completo por su rol, así que se ignoran para esa cuenta.
     nuevo_usuario.establecer_permisos_lista(
         datos.permisos if datos.rol == RolUsuario.EMPLEADO else []
     )
 
     db.add(nuevo_usuario)
-    db.commit()
+    _confirmar_o_rechazar_duplicado(db)
     db.refresh(nuevo_usuario)
 
     registrar_sistema(
@@ -117,21 +134,28 @@ def actualizar_usuario(
     # Los permisos se manejan aparte (pasan por establecer_permisos_lista())
     permisos_nuevos = datos_dict.pop("permisos", None)
 
-    # No se permite que un administrador se quite a sí mismo el rol o se desactive
+    # Bloque: un administrador no puede quitarse a sí mismo el rol ni desactivarse
     if usuario_objetivo.id == usuario_actual.id:
         if datos_dict.get("activo") is False:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes desactivar tu propia cuenta")
         if datos_dict.get("rol") == RolUsuario.EMPLEADO:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes quitarte tu propio rol de administrador")
 
-    # No se permite dejar el sistema sin ningún administrador activo
+    # Bloque: no se puede dejar el sistema sin ningún administrador activo. Se bloquean
+    # las filas de los demás administradores para que dos cambios simultáneos no
+    # puedan saltarse esta regla.
     si_se_desactiva = datos_dict.get("activo") is False
     si_se_quita_admin = datos_dict.get("rol") == RolUsuario.EMPLEADO
     if (si_se_desactiva or si_se_quita_admin) and usuario_objetivo.rol == RolUsuario.ADMINISTRADOR:
         otros_admins_activos = (
-            db.query(Usuario)
-            .filter(Usuario.rol == RolUsuario.ADMINISTRADOR, Usuario.activo.is_(True), Usuario.id != usuario_objetivo.id)
-            .first()
+            db.query(Usuario.id)
+            .filter(
+                Usuario.rol == RolUsuario.ADMINISTRADOR,
+                Usuario.activo.is_(True),
+                Usuario.id != usuario_objetivo.id,
+            )
+            .with_for_update()
+            .all()
         )
         if not otros_admins_activos:
             raise HTTPException(
@@ -141,17 +165,12 @@ def actualizar_usuario(
 
     if "correo" in datos_dict:
         correo_en_uso = (
-            db.query(Usuario)
+            db.query(Usuario.id)
             .filter(Usuario.correo == datos_dict["correo"], Usuario.id != usuario_id)
             .first()
         )
         if correo_en_uso:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ese correo ya está en uso por otro usuario")
-
-    # Los campos obligatorios no pueden quedar en nulo (la base de datos no lo admite)
-    for campo in ("nombre_completo", "correo", "rol", "activo"):
-        if campo in datos_dict and datos_dict[campo] is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"El campo '{campo}' no puede quedar vacío")
 
     rol_anterior = usuario_objetivo.rol
     activo_anterior = usuario_objetivo.activo
@@ -165,7 +184,7 @@ def actualizar_usuario(
     elif permisos_nuevos is not None:
         usuario_objetivo.establecer_permisos_lista(permisos_nuevos)
 
-    db.commit()
+    _confirmar_o_rechazar_duplicado(db)
     db.refresh(usuario_objetivo)
 
     # Bloque: deja constancia de los cambios sensibles (rol, estado y permisos)
@@ -207,7 +226,9 @@ def restablecer_contrasena(
 
 
 @router.put("/me/contrasena", status_code=status.HTTP_204_NO_CONTENT)
+@limitador.limit("5/minute")  # Frena adivinar la contraseña actual con un token robado
 def cambiar_mi_contrasena(
+    request: Request,
     datos: CambioContrasenaPropia,
     db: Session = Depends(obtener_db),
     usuario_actual: Usuario = Depends(obtener_usuario_actual),

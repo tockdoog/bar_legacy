@@ -1,27 +1,35 @@
 # Ruta: backend/app/routers/productos.py
-# Endpoints para gestionar el inventario de productos: crear, listar, buscar
-# por código de barras, actualizar, eliminar (desactivar), y subir/quitar
-# la imagen de cada producto. Sistema de uso general (no depende de ningún
-# nicho de negocio). Precios y montos en pesos colombianos (COP).
+# Endpoints para gestionar el inventario de productos: crear, listar, buscar por código de
+# barras, actualizar, eliminar (desactivar) y subir/quitar la imagen de cada producto.
+# Precios y montos en pesos colombianos (COP).
 #
-# PERMISOS: consultar el inventario está disponible para cualquier empleado
-# (necesario para operar el punto de venta). Crear, editar, eliminar y
-# gestionar imágenes requiere el permiso granular "inventario_gestionar".
+# PERMISOS: consultar el inventario está disponible para cualquier empleado (necesario para
+# operar el punto de venta). Crear, editar, eliminar y gestionar imágenes requiere el permiso
+# granular "inventario_gestionar".
 #
-# SEGURIDAD (datos financieros): el costo de compra y la configuración propia
-# de impuesto/margen revelan la utilidad del negocio. Solo se entregan a quien
-# tiene "inventario_gestionar" (o es administrador); para los demás salen en
-# None. Ver _a_respuesta().
+# SEGURIDAD (datos financieros): el costo de compra y la configuración propia de impuesto y
+# margen revelan la utilidad del negocio. Solo se entregan a quien tiene "inventario_gestionar"
+# (o es administrador); para los demás salen en None. Ver _a_respuesta().
 #
-# TRAZABILIDAD: los cambios de precio y existencias y las eliminaciones se
-# registran en logs/negocio.log con el valor anterior y el nuevo.
+# TRAZABILIDAD: los cambios de precio y existencias, las eliminaciones y las reactivaciones
+# se registran en el log de negocio con el valor anterior y el nuevo.
+#
+# CORRECCIONES (PostgreSQL/Neon):
+# - El código de barras es único entre TODOS los productos, incluidos los eliminados: al
+#   editar, un código de un producto eliminado ahora responde 400 con un mensaje claro
+#   (antes la restricción única fallaba con error 500).
+# - Una categoría inexistente responde 404 (antes violaba la llave foránea y daba 500).
+# - Dos solicitudes simultáneas con el mismo código responden 400 en vez de 500.
+# - Buscar por código solo devuelve productos ACTIVOS.
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import obtener_db
 from app.dependencies import requerir_rol, requerir_permiso
 from app.logs.logger import registrar_negocio
+from app.models.categoria import Categoria
 from app.models.producto import Producto
 from app.models.usuario import RolUsuario, Usuario
 from app.schemas.producto import ProductoCrear, ProductoActualizar, ProductoRespuesta
@@ -55,6 +63,26 @@ def _a_respuesta(producto: Producto, usuario: Usuario) -> ProductoRespuesta:
     )
 
 
+def _validar_categoria(db: Session, categoria_id: int | None) -> None:
+    """Responde 404 si se indica una categoría que no existe (evita violar la llave foránea)."""
+    if categoria_id is None:
+        return
+    if not db.query(Categoria.id).filter(Categoria.id == categoria_id).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Categoría no encontrada")
+
+
+def _confirmar_o_rechazar_codigo_duplicado(db: Session) -> None:
+    """Confirma los cambios; si otra petición guardó el mismo código de barras a la vez, responde 400."""
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ese código de barras ya está registrado en otro producto.",
+        )
+
+
 @router.get("/", response_model=list[ProductoRespuesta])
 def listar_productos(
     db: Session = Depends(obtener_db),
@@ -86,15 +114,19 @@ def buscar_producto_por_codigo(
     db: Session = Depends(obtener_db),
     usuario: Usuario = Depends(requerir_rol(RolUsuario.ADMINISTRADOR, RolUsuario.EMPLEADO)),
 ):
-    """Busca un producto mediante su código de barras (usado por el escáner)."""
-    producto = db.query(Producto).filter(Producto.codigo_barras == codigo_barras).first()
+    """Busca un producto ACTIVO mediante su código de barras (usado por el escáner)."""
+    producto = (
+        db.query(Producto)
+        .filter(Producto.codigo_barras == codigo_barras, Producto.activo.is_(True))
+        .first()
+    )
     if not producto:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
     return _a_respuesta(producto, usuario)
 
 
-# Límite de creación: evita que una cuenta comprometida o un script registre
-# cientos de productos falsos en segundos.
+# Límite de creación: evita que una cuenta comprometida o un script registre cientos de
+# productos falsos en segundos.
 @router.post("/", response_model=ProductoRespuesta, status_code=status.HTTP_201_CREATED)
 @limitador.limit("20/minute")
 def crear_producto(
@@ -106,39 +138,39 @@ def crear_producto(
     """
     Registra un nuevo producto (sin imagen; esta se sube después).
 
-    Consistencia con la eliminación lógica: un código de barras ya usado por un
-    producto ACTIVO se rechaza (duplicado real); si lo usa un producto INACTIVO
-    (eliminado antes), ese registro se reactiva y se actualiza en vez de crear
-    una fila nueva, conservando su historial de compras y ventas.
+    Consistencia con la eliminación lógica: un código de barras usado por un producto ACTIVO
+    se rechaza (duplicado real); si lo usa un producto INACTIVO (eliminado antes), ese
+    registro se reactiva y se actualiza en vez de crear una fila nueva, conservando su
+    historial de compras y ventas.
     """
+    _validar_categoria(db, datos.categoria_id)
+
     if datos.codigo_barras:
-        producto_activo_existente = (
-            db.query(Producto)
-            .filter(Producto.codigo_barras == datos.codigo_barras, Producto.activo.is_(True))
-            .first()
-        )
-        if producto_activo_existente:
+        existente = db.query(Producto).filter(Producto.codigo_barras == datos.codigo_barras).first()
+        if existente and existente.activo:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Ya existe un producto activo con ese código de barras",
             )
-
-        producto_inactivo_existente = (
-            db.query(Producto)
-            .filter(Producto.codigo_barras == datos.codigo_barras, Producto.activo.is_(False))
-            .first()
-        )
-        if producto_inactivo_existente:
+        if existente:
+            # Producto eliminado antes: se reactiva con los datos nuevos
             for campo, valor in datos.model_dump().items():
-                setattr(producto_inactivo_existente, campo, valor)
-            producto_inactivo_existente.activo = True
-            db.commit()
-            db.refresh(producto_inactivo_existente)
-            return _a_respuesta(producto_inactivo_existente, usuario)
+                setattr(existente, campo, valor)
+            existente.activo = True
+            _confirmar_o_rechazar_codigo_duplicado(db)
+            db.refresh(existente)
+
+            registrar_negocio(
+                accion=f"Reactivó el producto #{existente.id} '{existente.nombre}'",
+                usuario=usuario.nombre_usuario,
+                detalle=f"Existencias: {existente.stock_actual}",
+                request=request,
+            )
+            return _a_respuesta(existente, usuario)
 
     nuevo_producto = Producto(**datos.model_dump())
     db.add(nuevo_producto)
-    db.commit()
+    _confirmar_o_rechazar_codigo_duplicado(db)
     db.refresh(nuevo_producto)
     return _a_respuesta(nuevo_producto, usuario)
 
@@ -158,23 +190,25 @@ def actualizar_producto(
 
     datos_actualizados = datos.model_dump(exclude_unset=True)
 
-    # Si el código de barras cambia, no debe chocar con el de OTRO producto activo
+    if "categoria_id" in datos_actualizados:
+        _validar_categoria(db, datos_actualizados["categoria_id"])
+
+    # Bloque: el código de barras es único entre TODOS los productos (activos o eliminados)
     nuevo_codigo = datos_actualizados.get("codigo_barras")
     if nuevo_codigo:
         conflicto = (
-            db.query(Producto)
-            .filter(
-                Producto.codigo_barras == nuevo_codigo,
-                Producto.id != producto_id,
-                Producto.activo.is_(True),
-            )
+            db.query(Producto.id, Producto.activo)
+            .filter(Producto.codigo_barras == nuevo_codigo, Producto.id != producto_id)
             .first()
         )
         if conflicto:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ya existe otro producto activo con ese código de barras",
+            detalle = (
+                "Ya existe otro producto activo con ese código de barras"
+                if conflicto.activo
+                else "Ese código de barras pertenece a un producto eliminado. "
+                "Crea el producto de nuevo con ese código para reactivarlo."
             )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detalle)
 
     # Bloque: arma la lista de cambios auditables ANTES de modificar el producto
     cambios = [
@@ -186,7 +220,7 @@ def actualizar_producto(
     for campo, valor in datos_actualizados.items():
         setattr(producto, campo, valor)
 
-    db.commit()
+    _confirmar_o_rechazar_codigo_duplicado(db)
     db.refresh(producto)
 
     if cambios:
@@ -199,8 +233,8 @@ def actualizar_producto(
     return _a_respuesta(producto, usuario)
 
 
-# Límite de subida: procesar imágenes (Pillow) consume CPU; sin límite, una
-# cuenta comprometida podría saturar el servidor.
+# Límite de subida: procesar imágenes (Pillow) consume CPU; sin límite, una cuenta
+# comprometida podría saturar el servidor.
 @router.post("/{producto_id}/imagen", response_model=ProductoRespuesta)
 @limitador.limit("30/minute")
 async def subir_imagen_producto(
@@ -211,9 +245,9 @@ async def subir_imagen_producto(
     usuario: Usuario = Depends(requerir_permiso("inventario_gestionar")),
 ):
     """
-    Sube (o reemplaza) la imagen de un producto existente. El archivo se valida
-    y se procesa en utils.imagenes_productos antes de guardarse. Si el producto
-    ya tenía una imagen, el archivo anterior se elimina del disco.
+    Sube (o reemplaza) la imagen de un producto existente. El archivo se valida y procesa en
+    utils.imagenes_productos antes de guardarse en la base de datos. Si el producto ya tenía
+    una imagen, la anterior se elimina.
     """
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:

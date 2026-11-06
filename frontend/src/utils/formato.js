@@ -2,15 +2,21 @@
 // Utilidades de formato: pesos colombianos (COP) y fechas en la zona horaria
 // America/Bogota.
 //
-// IMPORTANTE: el backend guarda las fechas como hora local de Colombia SIN
-// zona horaria (ej. "2026-11-04T14:30:00"). Si el navegador las interpretara
-// como hora local del dispositivo, se mostrarían desfasadas en equipos con
-// otra zona. Por eso se leen como si fueran UTC y se muestran con
-// timeZone "UTC" (el reloj queda tal cual lo guardó el servidor). Las fechas
-// que sí traen zona explícita ("Z" o "+00:00") se convierten a Bogotá.
+// IMPORTANTE: el backend guarda las fechas como hora local de Colombia SIN zona horaria
+// (ej. "2026-11-04T14:30:00"). Si el navegador las interpretara como hora local del
+// dispositivo, se mostrarían desfasadas en equipos con otra zona. Por eso se leen como si
+// fueran UTC y se muestran con timeZone "UTC" (el reloj queda tal cual lo guardó el
+// servidor). Las fechas que sí traen zona explícita ("Z" o "+00:00") se convierten a Bogotá.
+//
+// CAMBIO: interpretarFecha ahora se exporta (la reutiliza utils/tiempo.js, antes duplicaba
+// la lectura) y recorta los decimales de segundo a 3 dígitos: Python envía 6 y algunos
+// navegadores (Safari) no los aceptan.
 
 const ZONA_BOGOTA = 'America/Bogota';
 const TIENE_ZONA = /(Z|[+-]\d{2}:?\d{2})$/i;
+
+// Marca que indica "fecha sin zona del backend, leída como reloj de pared en UTC"
+export const ZONA_FECHA_SIN_ZONA = 'UTC';
 
 // --- Bloque: formateador de moneda COP, sin decimales ---
 const formateadorCOP = new Intl.NumberFormat('es-CO', {
@@ -31,18 +37,20 @@ export function formatearNumero(valor) {
 }
 
 // --- Bloque: interpreta el texto de fecha del backend sin desfases ---
-function interpretarFecha(valor) {
+// Devuelve { fecha, zona } o null si el valor no es una fecha válida.
+export function interpretarFecha(valor) {
   if (!valor) return null;
   if (valor instanceof Date) return { fecha: valor, zona: ZONA_BOGOTA };
 
   let texto = String(valor).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) texto = `${texto}T00:00:00`;
-  texto = texto.replace(' ', 'T');
+  // Cambia el espacio por "T" y deja máximo 3 decimales de segundo
+  texto = texto.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
 
   const conZona = TIENE_ZONA.test(texto);
   const fecha = new Date(conZona ? texto : `${texto}Z`);
   if (Number.isNaN(fecha.getTime())) return null;
-  return { fecha, zona: conZona ? ZONA_BOGOTA : 'UTC' };
+  return { fecha, zona: conZona ? ZONA_BOGOTA : ZONA_FECHA_SIN_ZONA };
 }
 
 // --- Bloque: fecha legible en español (ej. "4 nov 2026, 2:30 p. m.") ---

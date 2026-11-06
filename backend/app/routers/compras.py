@@ -1,16 +1,18 @@
 # Ruta: backend/app/routers/compras.py
-# Endpoint para registrar compras a proveedores. Al confirmar una compra, el
-# inventario de cada producto involucrado aumenta automáticamente y se actualiza
-# su precio de compra con el costo más reciente.
+# Endpoint para registrar compras a proveedores. Al confirmar una compra, el inventario de
+# cada producto involucrado aumenta automáticamente y se actualiza su precio de compra con
+# el costo más reciente. Montos en pesos colombianos (COP).
 #
-# PERMISOS: todo este módulo requiere el permiso granular "compras_gestionar"
-# (el administrador siempre lo tiene por su rol; un empleado solo si el
-# administrador se lo asignó desde Usuarios).
+# PERMISOS: todo este módulo requiere el permiso granular "compras_gestionar" (el
+# administrador siempre lo tiene por su rol; un empleado solo si se lo asignaron).
 #
 # CAMBIOS EN ESTA VERSIÓN:
-# - No se aceptan productos inactivos (eliminados) dentro de una compra.
-# - Cada compra queda registrada en logs/negocio.log (quién, a quién y cuánto).
-# - El listado tiene un límite de filas para no devolver todo el historial.
+# - Los productos se bloquean en la base de datos (SELECT ... FOR UPDATE, en orden de id)
+#   antes de sumar el stock: dos compras simultáneas del mismo producto ya no pierden una suma.
+# - Si un mismo producto aparece dos veces en la compra, ambas líneas suman correctamente.
+# - Todo se valida ANTES de crear la compra (antes se creaba y luego fallaba a mitad de camino).
+# - Topes defensivos de cantidad y costo (evitan desbordar la columna entera de PostgreSQL).
+# - Los montos del log de negocio usan formato colombiano ("$ 1.500").
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session, joinedload
@@ -23,8 +25,14 @@ from app.models.producto import Producto
 from app.models.proveedor import Proveedor
 from app.models.usuario import Usuario
 from app.schemas.compra import CompraCrear, CompraRespuesta, DetalleCompraRespuesta
+from app.utils.formato_reportes import formatear_cop
 
 router = APIRouter(prefix="/api/compras", tags=["Compras"])
+
+# Topes defensivos (el esquema también debe validarlos)
+CANTIDAD_MAXIMA_POR_LINEA = 1_000_000
+COSTO_MAXIMO_UNITARIO = 1_000_000_000
+STOCK_MAXIMO = 2_000_000_000  # Límite de la columna entera de PostgreSQL (2.147 millones)
 
 
 def _construir_respuesta(compra: Compra) -> CompraRespuesta:
@@ -50,6 +58,14 @@ def _construir_respuesta(compra: Compra) -> CompraRespuesta:
     )
 
 
+def _consulta_compras(db: Session):
+    """Consulta base que trae cada compra con sus detalles, productos y proveedor en una sola consulta."""
+    return db.query(Compra).options(
+        joinedload(Compra.detalles).joinedload(DetalleCompra.producto),
+        joinedload(Compra.proveedor),
+    )
+
+
 @router.get("/", response_model=list[CompraRespuesta])
 def listar_compras(
     limite: int = Query(default=300, ge=1, le=1000),
@@ -57,13 +73,7 @@ def listar_compras(
     usuario=Depends(requerir_permiso("compras_gestionar")),
 ):
     """Lista el historial de compras, de la más reciente a la más antigua (con límite de filas)."""
-    compras = (
-        db.query(Compra)
-        .options(joinedload(Compra.detalles).joinedload(DetalleCompra.producto), joinedload(Compra.proveedor))
-        .order_by(Compra.fecha.desc())
-        .limit(limite)
-        .all()
-    )
+    compras = _consulta_compras(db).order_by(Compra.fecha.desc()).limit(limite).all()
     return [_construir_respuesta(c) for c in compras]
 
 
@@ -74,12 +84,7 @@ def obtener_compra(
     usuario=Depends(requerir_permiso("compras_gestionar")),
 ):
     """Obtiene el detalle completo de una compra."""
-    compra = (
-        db.query(Compra)
-        .options(joinedload(Compra.detalles).joinedload(DetalleCompra.producto), joinedload(Compra.proveedor))
-        .filter(Compra.id == compra_id)
-        .first()
-    )
+    compra = _consulta_compras(db).filter(Compra.id == compra_id).first()
     if not compra:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compra no encontrada")
     return _construir_respuesta(compra)
@@ -93,14 +98,47 @@ def registrar_compra(
     usuario: Usuario = Depends(requerir_permiso("compras_gestionar")),
 ):
     """
-    Registra una compra completa a un proveedor (con uno o varios productos).
-    Aumenta automáticamente el stock de cada producto y actualiza su precio de
-    compra con el costo unitario más reciente. Deja constancia en negocio.log.
+    Registra una compra completa a un proveedor (con uno o varios productos). Aumenta el
+    stock de cada producto y actualiza su precio de compra con el costo unitario más
+    reciente. Deja constancia en el log de negocio.
     """
     proveedor = db.query(Proveedor).filter(Proveedor.id == datos.proveedor_id).first()
     if not proveedor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado")
 
+    # Bloque: bloquea los productos (en orden de id, para evitar bloqueos cruzados) y valida todo
+    ids = sorted({item.producto_id for item in datos.items})
+    productos = {
+        producto.id: producto
+        for producto in db.query(Producto)
+        .filter(Producto.id.in_(ids), Producto.activo.is_(True))
+        .order_by(Producto.id)
+        .with_for_update()
+        .all()
+    }
+
+    cantidades_por_producto: dict[int, int] = {}
+    for item in datos.items:
+        if item.producto_id not in productos:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Producto con id {item.producto_id} no encontrado o inactivo",
+            )
+        if item.cantidad > CANTIDAD_MAXIMA_POR_LINEA or item.costo_unitario > COSTO_MAXIMO_UNITARIO:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La cantidad o el costo de un producto superan el máximo permitido.",
+            )
+        cantidades_por_producto[item.producto_id] = cantidades_por_producto.get(item.producto_id, 0) + item.cantidad
+
+    for producto_id, cantidad in cantidades_por_producto.items():
+        if productos[producto_id].stock_actual + cantidad > STOCK_MAXIMO:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El stock de '{productos[producto_id].nombre}' superaría el máximo permitido.",
+            )
+
+    # Bloque: crea la compra y sus detalles, y actualiza el inventario
     nueva_compra = Compra(proveedor_id=proveedor.id, usuario_id=usuario.id, total=0)
     db.add(nueva_compra)
     db.flush()  # Genera el id de la compra antes de crear sus detalles
@@ -108,18 +146,7 @@ def registrar_compra(
     total_calculado = 0.0
     resumen_productos: list[str] = []
     for item in datos.items:
-        # Solo se pueden comprar productos activos (los eliminados ya no están en el catálogo)
-        producto = (
-            db.query(Producto)
-            .filter(Producto.id == item.producto_id, Producto.activo.is_(True))
-            .first()
-        )
-        if not producto:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Producto con id {item.producto_id} no encontrado o inactivo",
-            )
-
+        producto = productos[item.producto_id]
         db.add(
             DetalleCompra(
                 compra_id=nueva_compra.id,
@@ -137,12 +164,12 @@ def registrar_compra(
 
     nueva_compra.total = round(total_calculado, 2)
     db.commit()
-    db.refresh(nueva_compra)
 
+    compra = _consulta_compras(db).filter(Compra.id == nueva_compra.id).one()
     registrar_negocio(
-        accion=f"Registró la compra #{nueva_compra.id} al proveedor '{proveedor.nombre}'",
+        accion=f"Registró la compra #{compra.id} al proveedor '{proveedor.nombre}'",
         usuario=usuario.nombre_usuario,
-        detalle=f"Total: ${nueva_compra.total:,.0f} | Productos: {', '.join(resumen_productos)}",
+        detalle=f"Total: {formatear_cop(compra.total)} | Productos: {', '.join(resumen_productos)}",
         request=request,
     )
-    return _construir_respuesta(nueva_compra)
+    return _construir_respuesta(compra)
